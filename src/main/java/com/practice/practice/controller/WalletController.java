@@ -14,36 +14,35 @@ public class WalletController {
 
     private final WalletService walletService;
 
-    public WalletController(WalletService walletService){
+    public WalletController(WalletService walletService) {
         this.walletService = walletService;
     }
 
     // Deposit money
     @PostMapping("/deposit")
-    public ResponseEntity<WalletEntity> deposit(@RequestBody DepositRequest request){
+    public ResponseEntity<WalletEntity> deposit(@RequestBody DepositRequest request) {
         WalletEntity wallet = walletService.deposit(request);
         return ResponseEntity.ok(wallet);
     }
 
     // Transfer money
     @PostMapping("/transfer")
-    public ResponseEntity<String> transfer(@RequestBody TransferRequest request){
-        walletService.transfer(request);
+    public ResponseEntity<String> transfer(@RequestHeader("idempotency-key") String key,
+            @RequestBody TransferRequest request) {
+        walletService.transfer(request, key);
         return ResponseEntity.ok("Transfer successful");
     }
 
     // Check balance
     @GetMapping("/balance")
-    public ResponseEntity<Double> balance(@RequestParam Long walletId){
-                return ResponseEntity.ok(walletService.getBalance(walletId));
+    public ResponseEntity<Double> balance(@RequestParam Long walletId) {
+        return ResponseEntity.ok(walletService.getBalance(walletId));
 
     }
 }
-
-
 
 // POST /users/register
 // POST /wallet/deposit
 // POST /wallet/transfer
 // GET /wallet/balance
-// GET /transactions    
+// GET /transactions
