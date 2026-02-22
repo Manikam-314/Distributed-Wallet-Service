@@ -6,8 +6,10 @@ import com.practice.practice.dto.DepositRequest;
 import com.practice.practice.dto.TransferRequest;
 import com.practice.practice.enumss.TransactionType;
 import com.practice.practice.model.IdempotencyKey;
+import com.practice.practice.model.LedgerEntry;
 import com.practice.practice.model.WalletEntity;
 import com.practice.practice.repository.IdempotencyKeyRepository;
+import com.practice.practice.repository.LedgerRepository;
 import com.practice.practice.repository.TransactionRepository;
 import com.practice.practice.repository.WalletRepository;
 import com.practice.practice.model.Transaction;
@@ -18,90 +20,73 @@ public class WalletService {
     private final WalletRepository walletRepository;
     private final IdempotencyKeyRepository idempotencyRepository;
     private final TransactionRepository transactionRepository;
+    private final LedgerRepository ledgerRepository;
 
     public WalletService(WalletRepository walletRepository,
             IdempotencyKeyRepository idempotencyRepository,
-            TransactionRepository transactionRepository) {
+            TransactionRepository transactionRepository, LedgerRepository ledgerRepository) {
         this.walletRepository = walletRepository;
         this.idempotencyRepository = idempotencyRepository;
         this.transactionRepository = transactionRepository;
+        this.ledgerRepository = ledgerRepository;
     }
 
-    @Transactional
-    public WalletEntity deposit(DepositRequest depositRequest) {
-        // 1. Find existing wallet
-        WalletEntity wallet = walletRepository.findById(depositRequest.getWalletId())
-                .orElseThrow(() -> new RuntimeException("Wallet not found"));
+    // ================= DEPOSIT =================
+@Transactional
+public Double deposit(DepositRequest request) {
 
-        // 2. Update balance
-        wallet.setBalance(wallet.getBalance() + depositRequest.getAmount());
+    walletRepository.findById(request.getWalletId())
+            .orElseThrow(() -> new RuntimeException("Wallet not found"));
 
-        // 3. Save wallet
-        return walletRepository.save(wallet);
+    LedgerEntry entry = new LedgerEntry();
+    entry.setWalletId(request.getWalletId());
+    entry.setAmount(request.getAmount());
+    entry.setType("CREDIT");
 
-        // save in DB
-    }
+    ledgerRepository.save(entry);
+
+    // return updated balance
+    return ledgerRepository.calculateBalance(request.getWalletId());
+}
 
     // ================= TRANSFER =================
     @Transactional
     public void transfer(TransferRequest request, String key) {
 
-        try {
-            if (idempotencyRepository.existsByKey(key)) {
-                throw new RuntimeException("Duplicate request");
-            }
-            WalletEntity sender = walletRepository.findById(request.getSenderWalletId())
-                    .orElseThrow(() -> new RuntimeException("Sender wallet not found"));
-
-            WalletEntity receiver = walletRepository.findById(request.getReceiverWalletId())
-                    .orElseThrow(() -> new RuntimeException("Receiver wallet not found"));
-
-            if (sender.getBalance() < request.getAmount()) {
-                throw new RuntimeException("Insufficient balance");
-            }
-
-            // ✅ update balances
-            sender.setBalance(sender.getBalance() - request.getAmount());
-            receiver.setBalance(receiver.getBalance() + request.getAmount());
-            walletRepository.save(sender);
-            walletRepository.save(receiver);
-
-            // DEBIT entry
-            Transaction debit = new Transaction();
-            debit.setSenderWallet(sender);
-            debit.setAmount(request.getAmount());
-            debit.setType(TransactionType.DEBIT);
-            System.out.println("TRANSFER STARTED");
-            System.out.println("Saving debit transaction");
-            System.out.println("Saving credit transaction");
-            // CREDIT entry
-            Transaction credit = new Transaction();
-            credit.setReceiverWallet(receiver);
-            credit.setAmount(request.getAmount());
-            credit.setType(TransactionType.CREDIT);
-
-            transactionRepository.save(debit);
-            transactionRepository.save(credit);
-
-            // 2. store idempotency key after success
-            IdempotencyKey record = new IdempotencyKey();
-            record.setKey(key);
-            record.setResponse("Transfer successful");
-
-            idempotencyRepository.save(record);
-
-        } catch (ObjectOptimisticLockingFailureException e) {
-            throw new RuntimeException("Transaction failed — wallet updated by another request. Try again.");
+        if (idempotencyRepository.existsByKey(key)) {
+            throw new RuntimeException("Duplicate request");
         }
-        System.out.println("TRANSFER COMPLETED");
+
+        Double senderBalance = ledgerRepository.calculateBalance(request.getSenderWalletId());
+
+        if (senderBalance < request.getAmount()) {
+            throw new RuntimeException("Insufficient balance");
+        }
+
+        // sender debit
+        LedgerEntry debit = new LedgerEntry();
+        debit.setWalletId(request.getSenderWalletId());
+        debit.setAmount(-request.getAmount());
+        debit.setType("DEBIT");
+
+        // receiver credit
+        LedgerEntry credit = new LedgerEntry();
+        credit.setWalletId(request.getReceiverWalletId());
+        credit.setAmount(request.getAmount());
+        credit.setType("CREDIT");
+
+        ledgerRepository.save(debit);
+        ledgerRepository.save(credit);
+
+        IdempotencyKey record = new IdempotencyKey();
+        record.setKey(key);
+        record.setResponse("Transfer successful");
+
+        idempotencyRepository.save(record);
     }
 
-    // ================= CHECK BALANCE =================
+    // ================= BALANCE =================
     public Double getBalance(Long walletId) {
-
-        WalletEntity wallet = walletRepository.findById(walletId)
-                .orElseThrow(() -> new RuntimeException("Wallet not found"));
-
-        return wallet.getBalance();
+        return ledgerRepository.calculateBalance(walletId);
     }
 }

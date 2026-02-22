@@ -20,9 +20,8 @@ public class WalletController {
 
     // Deposit money
     @PostMapping("/deposit")
-    public ResponseEntity<WalletEntity> deposit(@RequestBody DepositRequest request) {
-        WalletEntity wallet = walletService.deposit(request);
-        return ResponseEntity.ok(wallet);
+    public ResponseEntity<Double> deposit(@RequestBody DepositRequest request) {
+        return ResponseEntity.ok(walletService.deposit(request));
     }
 
     // Transfer money
