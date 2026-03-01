@@ -2,6 +2,7 @@ package com.programming.techie.config;
 
 import com.programming.techie.events.TransactionCreatedEvent;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.context.annotation.*;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -40,7 +41,13 @@ public class  KafkaConsumerConfig {
     public DefaultErrorHandler errorHandler(KafkaTemplate<String, Object> dlqKafkaTemplate) {
 
         DeadLetterPublishingRecoverer recoverer =
-                new DeadLetterPublishingRecoverer(dlqKafkaTemplate);
+                new DeadLetterPublishingRecoverer(
+                        dlqKafkaTemplate,
+                        (record, ex) -> new TopicPartition(
+                                record.topic() + ".DLT",
+                                record.partition()
+                        )
+                );
 
         FixedBackOff backOff = new FixedBackOff(2000L, 3);
 

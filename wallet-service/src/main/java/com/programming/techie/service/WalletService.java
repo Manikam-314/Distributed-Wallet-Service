@@ -69,7 +69,7 @@ public class WalletService {
 
     @Transactional
     public void processTransaction(Long transactionId, Long walletId, Double amount) {
-
+//        throw new RuntimeException("FORCE DLQ TEST");
         try {
             debit(walletId, amount);
 
