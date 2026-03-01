@@ -2,15 +2,17 @@ package com.programming.techie.service;
 
 import com.programming.techie.entity.Transaction;
 import com.programming.techie.enums.TransactionType;
+import com.programming.techie.events.TransactionCreatedEvent;
 import com.programming.techie.repository.IdempotencyKeyRepository;
 import com.programming.techie.repository.TransactionRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import com.programming.techie.service.TransactionService;
 import com.programming.techie.entity.IdempotencyKey;
-import org.springframework.web.reactive.function.client.WebClient;
+import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -18,53 +20,62 @@ public class TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final IdempotencyKeyRepository idempotencyRepository;
-    private final WebClient webClient;
 
-    private final String WALLET_SERVICE_URL = "http://localhost:8081";
+    // ⭐ Kafka producer
+    private final KafkaTemplate<String, TransactionCreatedEvent> kafkaTemplate;
 
-    // ⭐ TRANSFER LOGIC MOVED HERE
-    public void transfer(Long senderWalletId, Long receiverWalletId,
-                         Double amount, String key) {
+    private static final String TRANSACTION_TOPIC = "transaction-created";
 
-        if (idempotencyRepository.existsByKey(key)) {
+    /**
+     * Transfer money using event-driven architecture.
+     * No REST calls to wallet service.
+     */
+    public void transfer(Long senderWalletId,
+                         Long receiverWalletId,
+                         Double amount,
+                         String idempotencyKey) {
+
+        // ================= IDENTITY CHECK =================
+        if (idempotencyRepository.existsByKey(idempotencyKey)) {
             throw new RuntimeException("Duplicate request");
         }
 
-        // debit sender
-        webClient.post()
-                .uri(WALLET_SERVICE_URL +
-                        "/wallet/debit?walletId=" + senderWalletId +
-                        "&amount=" + amount)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
-
-        // credit receiver
-        webClient.post()
-                .uri(WALLET_SERVICE_URL +
-                        "/wallet/credit?walletId=" + receiverWalletId +
-                        "&amount=" + amount)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
-
-        // save transaction record
+        // ================= SAVE TRANSACTION =================
         Transaction tx = new Transaction();
         tx.setSenderWalletId(senderWalletId);
         tx.setReceiverWalletId(receiverWalletId);
         tx.setAmount(amount);
         tx.setType(TransactionType.TRANSFER);
-        tx.setStatus("SUCCESS");
+        tx.setStatus("PENDING"); // important for distributed systems
 
-        transactionRepository.save(tx);
+        Transaction savedTx = transactionRepository.save(tx);
 
+        // ================= CREATE EVENT =================
+        TransactionCreatedEvent event = new TransactionCreatedEvent(
+                savedTx.getId(),
+                senderWalletId,
+                receiverWalletId,
+                amount,
+                Instant.now(),
+                idempotencyKey
+        );
+
+        // ================= PUBLISH EVENT =================
+        kafkaTemplate.send(
+                TRANSACTION_TOPIC,
+                savedTx.getId().toString(), // key for ordering
+                event
+        );
+
+        // ================= STORE IDEMPOTENCY =================
         IdempotencyKey record = new IdempotencyKey();
-        record.setKey(key);
-        record.setResponse("Transfer successful");
+        record.setKey(idempotencyKey);
+        record.setResponse("Transaction initiated");
 
         idempotencyRepository.save(record);
     }
-    // get transaction history of wallet
+
+    // ================= TRANSACTION HISTORY =================
     public List<Transaction> getTransactions(Long walletId) {
         return transactionRepository
                 .findBySenderWalletIdOrReceiverWalletId(walletId, walletId);

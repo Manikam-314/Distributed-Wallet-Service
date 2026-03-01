@@ -1,5 +1,6 @@
 package com.programming.techie.service;
-
+import com.programming.techie.events.TransactionProcessedEvent;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import com.programming.techie.dto.DepositRequest;
 import com.programming.techie.entity.LedgerEntry;
@@ -14,13 +15,15 @@ public class WalletService {
 
     private final WalletRepository walletRepository;
     private final LedgerRepository ledgerRepository;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
     public WalletService(WalletRepository walletRepository,
-                         LedgerRepository ledgerRepository) {
+                         LedgerRepository ledgerRepository,
+                         KafkaTemplate<String, Object> kafkaTemplate) {
         this.walletRepository = walletRepository;
         this.ledgerRepository = ledgerRepository;
+        this.kafkaTemplate = kafkaTemplate;
     }
-
     // ================= CREATE WALLET =================
     public void createWallet(Long userId) {
         WalletEntity wallet = new WalletEntity();
@@ -64,6 +67,33 @@ public class WalletService {
         ledgerRepository.save(entry);
     }
 
+    @Transactional
+    public void processTransaction(Long transactionId, Long walletId, Double amount) {
+
+        try {
+            debit(walletId, amount);
+
+            System.out.println("SENDING SUCCESS EVENT → " + transactionId);
+
+            kafkaTemplate.send(
+                    "transaction-processed",
+                    transactionId.toString(),
+                    new TransactionProcessedEvent(transactionId, "SUCCESS", null)
+            );
+
+        } catch (Exception e) {
+
+            System.out.println("SENDING FAILED EVENT → " + transactionId);
+
+            kafkaTemplate.send(
+                    "transaction-processed",
+                    transactionId.toString(),
+                    new TransactionProcessedEvent(transactionId, "FAILED", e.getMessage())
+            );
+
+            throw e;
+        }
+    }
     // ⭐ NEW → CREDIT WALLET
     @Transactional
     public void credit(Long walletId, Double amount) {
