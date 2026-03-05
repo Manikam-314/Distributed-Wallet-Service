@@ -10,6 +10,9 @@ import com.programming.techie.repository.LedgerRepository;
 import com.programming.techie.repository.WalletRepository;
 import com.programming.techie.exception.ResourceNotFoundException;
 import jakarta.transaction.Transactional;
+
+import java.math.BigDecimal;
+
 @Service
 public class WalletService {
 
@@ -34,41 +37,41 @@ public class WalletService {
 
     // ================= DEPOSIT =================
     @Transactional
-    public Double deposit(DepositRequest request) {
+    public BigDecimal deposit(Long walletId, BigDecimal amount) {
 
-        walletRepository.findById(request.getWalletId())
-                .orElseThrow(() -> new ResourceNotFoundException("Wallet not found"));
+        walletRepository.findById(walletId)
+                .orElseThrow(() -> new RuntimeException("Wallet not found"));
 
         LedgerEntry entry = new LedgerEntry();
-        entry.setWalletId(request.getWalletId());
-        entry.setAmount(request.getAmount());
+        entry.setWalletId(walletId);
+        entry.setAmount(amount);
         entry.setType("CREDIT");
 
         ledgerRepository.save(entry);
 
-        return ledgerRepository.calculateBalance(request.getWalletId());
+        return ledgerRepository.calculateBalance(walletId);
     }
 
     // ⭐ NEW → DEBIT WALLET
     @Transactional
-    public void debit(Long walletId, Double amount) {
+    public void debit(Long walletId, BigDecimal amount) {
 
-        Double balance = ledgerRepository.calculateBalance(walletId);
+        BigDecimal balance = ledgerRepository.calculateBalance(walletId);
 
-        if (balance < amount) {
+        if (balance.compareTo(amount) < 0) {
             throw new RuntimeException("Insufficient balance");
         }
 
         LedgerEntry entry = new LedgerEntry();
         entry.setWalletId(walletId);
-        entry.setAmount(-amount);
+        entry.setAmount(amount.negate());
         entry.setType("DEBIT");
 
         ledgerRepository.save(entry);
     }
 
     @Transactional
-    public void processTransaction(Long transactionId, Long walletId, Double amount) {
+    public void processTransaction(Long transactionId, Long walletId, BigDecimal amount) {
 //        throw new RuntimeException("FORCE DLQ TEST");
         try {
             debit(walletId, amount);
@@ -96,7 +99,10 @@ public class WalletService {
     }
     // ⭐ NEW → CREDIT WALLET
     @Transactional
-    public void credit(Long walletId, Double amount) {
+    public void credit(Long walletId, BigDecimal amount) {
+
+        walletRepository.findById(walletId)
+                .orElseThrow(() -> new RuntimeException("Wallet not found"));
 
         LedgerEntry entry = new LedgerEntry();
         entry.setWalletId(walletId);
@@ -105,9 +111,8 @@ public class WalletService {
 
         ledgerRepository.save(entry);
     }
-
     // ================= BALANCE =================
-    public Double getBalance(Long walletId) {
+    public BigDecimal getBalance(Long walletId) {
         return ledgerRepository.calculateBalance(walletId);
     }
 }

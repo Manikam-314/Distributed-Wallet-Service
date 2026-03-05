@@ -20,10 +20,10 @@ public class  KafkaConsumerConfig {
 
     // ⭐ CONSUMER FACTORY
     @Bean
-    public ConsumerFactory<String, TransactionCreatedEvent> consumerFactory() {
+    public ConsumerFactory<String, Object> consumerFactory() {
 
-        JsonDeserializer<TransactionCreatedEvent> deserializer =
-                new JsonDeserializer<>(TransactionCreatedEvent.class);
+        JsonDeserializer<Object> deserializer =
+                new JsonDeserializer<>(Object.class);
 
         deserializer.addTrustedPackages("*");
 
@@ -37,6 +37,7 @@ public class  KafkaConsumerConfig {
                 deserializer
         );
     }
+
     @Bean
     public DefaultErrorHandler errorHandler(KafkaTemplate<String, Object> dlqKafkaTemplate) {
 
@@ -53,20 +54,18 @@ public class  KafkaConsumerConfig {
 
         return new DefaultErrorHandler(recoverer, backOff);
     }
-// ⭐ LISTENER FACTORY
-@Bean
-public ConcurrentKafkaListenerContainerFactory<String, TransactionCreatedEvent>
-kafkaListenerContainerFactory(DefaultErrorHandler errorHandler) {
 
-    ConcurrentKafkaListenerContainerFactory<String, TransactionCreatedEvent> factory =
-            new ConcurrentKafkaListenerContainerFactory<>();
+    // ⭐ LISTENER FACTORY
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, Object>
+    kafkaListenerContainerFactory(DefaultErrorHandler errorHandler) {
 
-    factory.setConsumerFactory(consumerFactory());
+        ConcurrentKafkaListenerContainerFactory<String, Object> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
 
-    // VERY IMPORTANT
-    factory.setCommonErrorHandler(errorHandler);
+        factory.setConsumerFactory(consumerFactory());
+        factory.setCommonErrorHandler(errorHandler);
 
-    return factory;
+        return factory;
+    }
 }
-}
-

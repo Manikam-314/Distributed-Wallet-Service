@@ -2,6 +2,7 @@ package com.programming.techie.consumer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.programming.techie.entity.FailedEvent;
+import com.programming.techie.monitoring.KafkaMetricsService;
 import com.programming.techie.repository.FailedEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -15,7 +16,7 @@ import java.time.Instant;
 @Component
 @RequiredArgsConstructor
 public class DLQConsumer {
-
+    private final KafkaMetricsService metricsService;
     private final FailedEventRepository failedEventRepository;
     private final ObjectMapper objectMapper;   // ⭐ inject this
     @KafkaListener(topics = "transaction-created.DLT", groupId = "wallet-dlq-group")
@@ -38,7 +39,8 @@ public class DLQConsumer {
                     .build();
 
             failedEventRepository.save(failedEvent);
-
+            metricsService.incrementDLQ();
+            metricsService.printMetrics();
             System.out.println("DLQ event stored in DB");
 
         } catch (Exception e) {

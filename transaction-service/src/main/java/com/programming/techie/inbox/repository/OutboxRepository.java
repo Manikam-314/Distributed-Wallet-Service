@@ -1,6 +1,6 @@
-package com.programming.techie.outbox.repository;
+package com.programming.techie.inbox.repository;
 
-import com.programming.techie.outbox.entity.OutboxEvent;
+import com.programming.techie.inbox.entity.OutboxEvent;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;

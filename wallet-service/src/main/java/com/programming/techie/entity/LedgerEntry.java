@@ -3,6 +3,7 @@ package com.programming.techie.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -20,7 +21,8 @@ public class LedgerEntry {
 
     // + amount = credit
     // - amount = debit
-    private Double amount;
+    @Column(precision = 19, scale = 4)
+    private BigDecimal amount;
 
     private String type;
 

@@ -1,4 +1,4 @@
-package com.programming.techie.outbox.entity;
+package com.programming.techie.inbox.entity;
 
 import jakarta.persistence.*;
 import lombok.*;

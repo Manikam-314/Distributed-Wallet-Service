@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import com.programming.techie.enums.TransactionType;
 import jakarta.persistence.*;
 import lombok.*;
+import java.math.BigDecimal;
 
 @Data
 @AllArgsConstructor
@@ -16,8 +17,8 @@ public class Transaction {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private Double amount;
 
+    private BigDecimal amount;
     private String status;
 
     private Long senderWalletId;
