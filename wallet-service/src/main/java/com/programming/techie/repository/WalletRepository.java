@@ -7,5 +7,8 @@ import java.util.Optional;
 public interface WalletRepository extends JpaRepository<WalletEntity, Long> {
 
     // find wallet by user
-    Optional<WalletEntity> findByUserId(Long userId);
+    java.util.List<WalletEntity> findAllByUserId(Long userId);
+
+    @org.springframework.data.jpa.repository.Query("SELECT w FROM WalletEntity w WHERE w.userId = :userId")
+    java.util.Optional<WalletEntity> findFirstByUserId(@org.springframework.data.repository.query.Param("userId") Long userId);
 }

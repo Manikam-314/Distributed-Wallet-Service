@@ -25,7 +25,8 @@ public class CompensationConsumer {
 
         System.out.println("COMPENSATION RECEIVED → " + event.getTransactionId());
 
-        walletService.credit(
+        walletService.compensate(
+                event.getTransactionId(),
                 event.getWalletId(),
                 event.getAmount()
         );

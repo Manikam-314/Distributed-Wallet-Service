@@ -20,7 +20,19 @@ public class WalletController {
     }
 
     @PostMapping("/deposit")
-    public ResponseEntity<BigDecimal> deposit(@RequestBody DepositRequest request) {
+    public ResponseEntity<BigDecimal> deposit(
+            @RequestHeader(value = "loggedInUserId", required = false) String loggedInUserId,
+            @RequestBody DepositRequest request) {
+            
+        if (loggedInUserId == null || loggedInUserId.isEmpty()) {
+            return ResponseEntity.status(401).build();
+        }
+        
+        WalletEntity wallet = walletService.getWalletById(request.getWalletId());
+        if (!wallet.getUserId().equals(Long.parseLong(loggedInUserId))) {
+            return ResponseEntity.status(403).build();
+        }
+        
         return ResponseEntity.ok(
                 walletService.deposit(
                         request.getWalletId(),
@@ -35,6 +47,16 @@ public class WalletController {
         return ResponseEntity.ok("Wallet created");
     }
 
+    @GetMapping("/by-user/{userId}")
+    public ResponseEntity<WalletEntity> getByUserId(@PathVariable Long userId) {
+        return ResponseEntity.ok(walletService.getWalletByUserId(userId));
+    }
+
+    @GetMapping("/{walletId}")
+    public ResponseEntity<WalletEntity> getById(@PathVariable Long walletId) {
+        return ResponseEntity.ok(walletService.getWalletById(walletId));
+    }
+
     @PostMapping("/debit")
     public ResponseEntity<String> debit(@RequestBody DepositRequest request) {
         walletService.debit(
@@ -47,6 +69,7 @@ public class WalletController {
     @PostMapping("/credit")
     public ResponseEntity<String> credit(@RequestBody DepositRequest request) {
         walletService.credit(
+                null, // manual external credit
                 request.getWalletId(),
                 BigDecimal.valueOf(request.getAmount())
         );
@@ -56,5 +79,10 @@ public class WalletController {
     @GetMapping("/balance")
     public ResponseEntity<BigDecimal> balance(@RequestParam Long walletId) {
         return ResponseEntity.ok(walletService.getBalance(walletId));
+    }
+
+    @GetMapping("/audit/rebuild")
+    public ResponseEntity<BigDecimal> rebuild(@RequestParam Long walletId) {
+        return ResponseEntity.ok(walletService.rebuildBalanceFromEvents(walletId));
     }
 }

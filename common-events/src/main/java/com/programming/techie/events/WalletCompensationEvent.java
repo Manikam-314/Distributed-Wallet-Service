@@ -15,3 +15,4 @@ public class WalletCompensationEvent {
     private Long walletId;
     private BigDecimal amount;
 }
+

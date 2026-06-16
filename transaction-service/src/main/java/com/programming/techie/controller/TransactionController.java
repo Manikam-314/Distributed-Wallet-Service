@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -20,23 +21,34 @@ public class TransactionController {
     // POST /transactions/transfer
     @PostMapping("/transfer")
     public ResponseEntity<String> transfer(
-            @RequestHeader("idempotency-key") String key,
-            @RequestBody TransferRequest request
-    ) {
+            @RequestHeader(value = "idempotency-key", required = false) String key,
+            @RequestHeader(value = "loggedInUserId", required = false) String loggedInUserId,
+            @RequestBody TransferRequest request) {
+            
+        if (loggedInUserId == null || loggedInUserId.isEmpty()) {
+            return ResponseEntity.status(401).body("Unauthorized");
+        }
+        
         transactionService.transfer(
                 request.getSenderWalletId(),
                 request.getReceiverWalletId(),
                 request.getAmount(),
-                key
-        );        return ResponseEntity.ok("Transfer successful");
+                key,
+                Long.parseLong(loggedInUserId));
+                
+        return ResponseEntity.ok("Transfer successful");
     }
 
     // ================= TRANSACTION HISTORY =================
     // GET /transactions?walletId=1
     @GetMapping
     public ResponseEntity<List<Transaction>> getTransactions(
-            @RequestParam Long walletId
-    ){
+            @RequestParam Long walletId) {
         return ResponseEntity.ok(transactionService.getTransactions(walletId));
+    }
+
+    @GetMapping("/balance/{walletId}")
+    public ResponseEntity<BigDecimal> getBalance(@PathVariable Long walletId) {
+        return ResponseEntity.ok(transactionService.getBalance(walletId));
     }
 }

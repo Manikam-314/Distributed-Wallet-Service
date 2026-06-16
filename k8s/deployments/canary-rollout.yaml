@@ -1,0 +1,38 @@
+# This is an example of a Canary Deployment using Argo Rollouts.
+# It requires the Argo Rollouts controller to be installed in the cluster.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: auth-service-rollout
+  namespace: distributed-wallet
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      steps:
+      - setWeight: 20
+      - pause: {duration: 10m} # Wait for 10 minutes to observe
+      - setWeight: 50
+      - pause: {duration: 5m}
+      - setWeight: 100
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+      - name: auth-service
+        image: distributed-wallet/auth-service:latest
+        ports:
+        - containerPort: 9099
+        envFrom:
+        - configMapRef:
+            name: wallet-config
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 9099
+          initialDelaySeconds: 20

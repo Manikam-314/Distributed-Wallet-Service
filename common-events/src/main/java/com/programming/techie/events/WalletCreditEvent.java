@@ -10,9 +10,9 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 @NoArgsConstructor
 public class WalletCreditEvent {
+    private Long transactionId;
 
     private Long walletId;
 
     private BigDecimal amount;
-
 }

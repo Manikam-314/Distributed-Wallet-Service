@@ -17,12 +17,13 @@ public class WalletEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(unique = true)
     private Long userId;
 
-    private Double balance;
+    private java.math.BigDecimal balance;
 
     @Version
-        private Long version;
+    private Long version;
 }
 //
 //    @OneToOne

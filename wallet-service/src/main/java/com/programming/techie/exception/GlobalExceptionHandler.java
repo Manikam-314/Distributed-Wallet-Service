@@ -14,21 +14,27 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Object> handleResourceNotFoundException(ResourceNotFoundException ex) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("timestamp", LocalDateTime.now());
-        body.put("message", ex.getMessage());
-        body.put("status", HttpStatus.NOT_FOUND.value());
+        return buildResponse(ex.getMessage(), HttpStatus.NOT_FOUND);
+    }
 
-        return new ResponseEntity<>(body, HttpStatus.NOT_FOUND);
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Object> handleIllegalArgumentException(IllegalArgumentException ex) {
+        return buildResponse(ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Object> handleRuntimeException(RuntimeException ex) {
+        if(ex.getMessage().contains("Wallet is busy")) {
+            return buildResponse(ex.getMessage(), HttpStatus.LOCKED);
+        }
+        return buildResponse(ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    private ResponseEntity<Object> buildResponse(String message, HttpStatus status) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", LocalDateTime.now());
-        body.put("message", ex.getMessage());
-        body.put("status", HttpStatus.INTERNAL_SERVER_ERROR.value());
-
-        return new ResponseEntity<>(body, HttpStatus.INTERNAL_SERVER_ERROR);
+        body.put("error", message);
+        body.put("status", status.value());
+        return new ResponseEntity<>(body, status);
     }
 }

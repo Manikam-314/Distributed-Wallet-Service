@@ -1,0 +1,52 @@
+# Docker profile overrides for API Gateway
+# Overrides localhost URIs with Docker container hostnames
+
+server:
+  port: 8090
+
+spring:
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "http://localhost"
+              - "http://localhost:80"
+              - "http://consumer-wallet"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders: "*"
+            allowCredentials: true
+            exposedHeaders:
+              - "X-Correlation-ID"
+      default-filters:
+        - RemoveRequestHeader=Origin
+      routes:
+        - id: wallet-service
+          uri: http://wallet-service:8091
+          predicates:
+            - Path=/api/wallet/**
+          filters:
+            - AuthenticationFilter
+            - StripPrefix=1
+
+        - id: transaction-service
+          uri: http://transaction-service:8092
+          predicates:
+            - Path=/api/transactions/**, /api/requests/**
+          filters:
+            - AuthenticationFilter
+            - StripPrefix=1
+
+        - id: auth-service
+          uri: http://auth-service:8093
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - AuthenticationFilter
+            - StripPrefix=1

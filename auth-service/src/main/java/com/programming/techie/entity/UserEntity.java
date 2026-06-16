@@ -26,6 +26,12 @@ public class UserEntity {
 
     private String role;
     
+    @Column(unique = true)
+    private String mobileNumber;
+
+    @Column(nullable = false)
+    private boolean verified = false;
+    
     private LocalDateTime createdAt;
 
     @PrePersist

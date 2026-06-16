@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-ui
+  namespace: distributed-wallet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin-ui
+  template:
+    metadata:
+      labels:
+        app: admin-ui
+    spec:
+      containers:
+      - name: admin-ui
+        image: distributed-wallet/admin-ui:latest
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-ui
+  namespace: distributed-wallet
+spec:
+  selector:
+    app: admin-ui
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wallet-secrets
+  namespace: distributed-wallet
+type: Opaque
+data:
+  # Base64 encoded 'rootroot1234'
+  MYSQL_ROOT_PASSWORD: cm9vdHJvb3QxMjM0
+  # Base64 encoded 'admin'
+  GRAFANA_PASSWORD: YWRtaW4=
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wallet-config
+  namespace: distributed-wallet
+data:
+  SPRING_PROFILES_ACTIVE: prod
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  ZIPKIN_URL: http://tempo:9411

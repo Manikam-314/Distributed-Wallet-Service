@@ -10,4 +10,11 @@ public interface LedgerRepository extends JpaRepository<LedgerEntry, Long> {
 
     @Query("SELECT COALESCE(SUM(l.amount),0) FROM LedgerEntry l WHERE l.walletId = :walletId")
     BigDecimal calculateBalance(@Param("walletId") Long walletId);
+
+    @Query("SELECT COALESCE(SUM(l.amount),0) FROM LedgerEntry l WHERE l.walletId = :walletId AND l.id > :fromId")
+    BigDecimal calculateBalanceFromId(@Param("walletId") Long walletId, @Param("fromId") Long fromId);
+
+    long countByWalletId(Long walletId);
+
+    java.util.Optional<LedgerEntry> findFirstByWalletIdOrderByIdDesc(Long walletId);
 }

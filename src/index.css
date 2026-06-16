@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  --color-primary: #2563EB;
+  --color-primary-foreground: #FFFFFF;
+  
+  --color-secondary: #6366F1;
+  --color-secondary-foreground: #FFFFFF;
+
+  --color-success: #22C55E;
+  --color-success-foreground: #FFFFFF;
+
+  --color-danger: #EF4444;
+  --color-danger-foreground: #FFFFFF;
+
+  --color-warning: #F59E0B;
+  --color-warning-foreground: #FFFFFF;
+
+  --color-background: #F8FAFC;
+  --color-surface: #FFFFFF;
+
+  --color-foreground: #0F172A;
+  --color-muted: #475569;
+
+  --color-border: #E2E8F0;
+
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+}
+
+@layer base {
+  :root {
+    --background: var(--color-background);
+    --foreground: var(--color-foreground);
+    --card: var(--color-surface);
+    --card-foreground: var(--color-foreground);
+    --popover: var(--color-surface);
+    --popover-foreground: var(--color-foreground);
+    --primary: var(--color-primary);
+    --primary-foreground: var(--color-primary-foreground);
+    --secondary: var(--color-secondary);
+    --secondary-foreground: var(--color-secondary-foreground);
+    --muted: #F1F5F9;
+    --muted-foreground: var(--color-muted);
+    --accent: #F1F5F9;
+    --accent-foreground: var(--color-foreground);
+    --destructive: var(--color-danger);
+    --destructive-foreground: var(--color-danger-foreground);
+    --border: var(--color-border);
+    --input: var(--color-border);
+    --ring: var(--color-primary);
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@keyframes scan {
+  0% { top: 0; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}

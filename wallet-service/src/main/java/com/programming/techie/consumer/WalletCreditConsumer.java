@@ -21,6 +21,7 @@ public class WalletCreditConsumer {
         System.out.println("CREDIT EVENT RECEIVED → " + event.getWalletId());
 
         walletService.credit(
+                event.getTransactionId(),
                 event.getWalletId(),
                 event.getAmount()
         );

@@ -1,0 +1,54 @@
+# Git
+.git
+.gitignore
+.github
+
+# IDE
+.idea
+.vscode
+.mvn
+
+# Maven build output (built inside Docker, not needed from host)
+**/target
+
+# Node build output (built inside Docker)
+**/dist
+**/node_modules
+
+# Python virtual env & caches
+.venv
+**/__pycache__
+**/.pytest_cache
+*.pyc
+
+# Scratch / test files
+**/scratch
+
+# Build logs & misc files at root
+*.log
+*.txt
+!**/requirements.txt
+report.html
+test_mysql.py
+
+# Docker files
+docker-compose.test.yml
+Dockerfile
+
+# MySQL persisted data
+mysql-data
+
+# Tests (not needed in Docker images)
+tests
+
+# Consumer wallet v2 (unused)
+consumer-wallet-v2
+
+# Monitoring data (config is needed, data isn't)
+monitoring/**/*-data
+
+# Kubernetes manifests
+k8s
+
+# Logs dir
+logs

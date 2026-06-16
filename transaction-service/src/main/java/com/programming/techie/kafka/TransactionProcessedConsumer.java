@@ -1,5 +1,6 @@
 package com.programming.techie.kafka;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.programming.techie.events.WalletCompensationEvent;
 import com.programming.techie.entity.Transaction;
 import com.programming.techie.events.TransactionProcessedEvent;
@@ -8,9 +9,10 @@ import com.programming.techie.repository.TransactionRepository;
 import com.programming.techie.saga.entity.TransferSaga;
 import com.programming.techie.saga.repository.TransferSagaRepository;
 import com.programming.techie.saga.status.SagaStatus;
+import com.programming.techie.inbox.entity.OutboxEvent;
+import com.programming.techie.inbox.repository.OutboxRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,7 +24,8 @@ public class TransactionProcessedConsumer {
 
     private final TransactionRepository transactionRepository;
     private final TransferSagaRepository sagaRepository;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final OutboxRepository outboxRepository;
+    private final ObjectMapper objectMapper;
 
     @KafkaListener(
             topics = "transaction-processed",
@@ -46,18 +49,16 @@ public class TransactionProcessedConsumer {
             saga.setStatus(SagaStatus.COMPLETED);
             tx.setStatus("SUCCESS");
 
-            // ⭐ CREDIT RECEIVER WALLET
-            kafkaTemplate.send(
-                    "wallet-credit",
-                    new WalletCreditEvent(
-                            tx.getReceiverWalletId(),
-                            tx.getAmount()
-                    )
+            // ⭐ CREDIT RECEIVER WALLET (OUTBOX PATTERN / partitioned by receiver wallet)
+            WalletCreditEvent creditEvent = new WalletCreditEvent(
+                    tx.getId(),
+                    tx.getReceiverWalletId(),
+                    tx.getAmount()
             );
+            saveOutbox("wallet-credit", tx.getReceiverWalletId().toString(), creditEvent);
         } else {
 
             tx.setStatus("FAILED");
-
             saga.setStatus(SagaStatus.COMPENSATING);
 
             WalletCompensationEvent compensationEvent =
@@ -65,17 +66,30 @@ public class TransactionProcessedConsumer {
                             tx.getId(),
                             tx.getSenderWalletId(),
                             tx.getAmount()
-                    );
-
-            kafkaTemplate.send(
-                    "wallet-compensation-requested",
-                    tx.getId().toString(),
-                    compensationEvent
             );
+
+            saveOutbox("wallet-compensation-requested", tx.getSenderWalletId().toString(), compensationEvent);
         }
 
         saga.setUpdatedAt(Instant.now());
         sagaRepository.save(saga);
         transactionRepository.save(tx);
+    }
+    
+    private void saveOutbox(String topic, String aggregateId, Object payloadObj) {
+        try {
+            String payload = objectMapper.writeValueAsString(payloadObj);
+            OutboxEvent outboxEvent = OutboxEvent.builder()
+                    .aggregateType("TRANSACTION")
+                    .aggregateId(aggregateId)
+                    .payload(payload)
+                    .topic(topic)
+                    .published(false)
+                    .createdAt(Instant.now())
+                    .build();
+            outboxRepository.save(outboxEvent);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to serialize outbox event", e);
+        }
     }
 }

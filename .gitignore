@@ -37,3 +37,22 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Log files & test output ###
+*.log
+*.txt
+*.html
+*.png
+
+### Docker Database & Volume Data ###
+mysql-data/
+redis-data/
+kafka-data/
+zookeeper-data/
+zookeeper-log/
+prometheus-data/
+grafana-data/
+tempo-data/
+.venv/
+node_modules/
+dist/
