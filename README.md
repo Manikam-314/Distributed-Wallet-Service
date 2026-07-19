@@ -1,142 +1,219 @@
-🌐 Distributed Fintech Wallet System
+# 🌐 Distributed Fintech Wallet System
 
-📖 Overview
+# 📖 Overview
 
-Distributed Fintech Wallet System is a microservices-based digital wallet platform built using Spring Boot, Spring Cloud, Apache Kafka, Redis, React, and PostgreSQL/MySQL.
+This project demonstrates modern backend engineering concepts including:
 
-The project demonstrates modern backend engineering concepts including secure authentication, distributed transactions, event-driven communication, Redis caching, AI integration, observability, and containerized deployment.
+- Microservices Architecture
+- Spring Security & JWT Authentication
+- Distributed Transactions (Saga Pattern)
+- Apache Kafka Event-Driven Communication
+- Redis Caching & Distributed Locking
+- AI Integration using Spring AI & Groq
+- Fraud Detection using Python FastAPI
+- Docker & Kubernetes Deployment
+- AWS EC2 Deployment
+- Monitoring with Prometheus, Grafana, OpenTelemetry & Tempo
 
-🎯 Project Highlights
-Microservices Architecture using Spring Boot
-Secure Authentication with Spring Security & JWT
-Wallet-to-Wallet Money Transfer
-Distributed Transactions using Saga Pattern
-Apache Kafka Event-Driven Communication
-Transactional Outbox & Consumer Inbox Patterns
-Redis Caching & Distributed Locking
-AI-powered Wallet Assistant using Spring AI & Groq
-Fraud Detection Service using Python FastAPI
-Monitoring using Prometheus, Grafana & OpenTelemetry
-Docker & Kubernetes Deployment
-AWS EC2 Deployment Support
-🏗️ System Architecture
+---
 
-Architecture Diagram
+# 🎯 Project Highlights
 
-✨ Features
-🔐 Authentication & Security
-User Registration & Login
-JWT Authentication
-Spring Security
-Password Encryption
-Email OTP Verification
-SMS OTP Verification
-Role-based Authorization
-💳 Wallet Management
-Create Wallet
-Deposit Money
-Withdraw Money
-Wallet Balance
-Transaction History
-Wallet-to-Wallet Transfer
-🔄 Distributed Transactions
-Saga Orchestration
-Compensation Transactions
-Event-driven Processing
-Reliable Message Delivery
-⚡ Event-Driven Architecture
-Apache Kafka Producer
-Apache Kafka Consumer
-Asynchronous Notifications
-Decoupled Microservices
-🚀 Performance
-Redis Caching
-Redis Distributed Locks
-API Gateway Routing
-Scalable Microservices Architecture
-🤖 AI Features
-Spring AI Agent
-Groq Llama 3.3 Integration
-Natural Language Wallet Assistant
-Fraud Detection using FastAPI
-Transaction Categorization
-📊 Monitoring
-Prometheus Metrics
-Grafana Dashboards
-OpenTelemetry Tracing
-Grafana Tempo
-🧩 Microservices
-Service	Description
-API Gateway	Request routing, JWT validation, rate limiting
-Auth Service	User authentication and authorization
-Wallet Service	Wallet management, balance updates and Redis caching
-Transaction Service	Money transfers, Saga orchestration and Kafka publishing
-Notification Service	Email and SMS notifications
-AI Service	Fraud detection using FastAPI
-Agent Service	Spring AI conversational assistant
-🛠 Technology Stack
-Backend
-Java 17
-Spring Boot
-Spring Security
-Spring Cloud Gateway
-Spring Data JPA
-Hibernate
-REST APIs
-Frontend
-React
-TypeScript
-Vite
-Tailwind CSS
-Zustand
-React Query
-Database
-PostgreSQL
-MySQL
-Redis
-Messaging
-Apache Kafka
-Zookeeper
-AI
-Spring AI
-Groq API
-OpenAI API
-FastAPI
-Scikit-Learn
-DevOps
-Docker
-Docker Compose
-Kubernetes
-AWS EC2
-Monitoring
-Prometheus
-Grafana
-OpenTelemetry
-Grafana Tempo
-⚙️ Design Patterns
-Saga Pattern
+- Secure Wallet-to-Wallet Money Transfers
+- Event-Driven Architecture with Kafka
+- Saga Orchestration
+- Transactional Outbox Pattern
+- Consumer Inbox Pattern
+- Redis Distributed Locking
+- Redis Caching
+- AI Financial Assistant
+- Fraud Detection Service
+- Observability & Distributed Tracing
 
-Coordinates distributed money transfers across multiple microservices while maintaining consistency through compensation workflows.
+---
 
-Transactional Outbox Pattern
+# 🏗️ System Architecture
 
-Ensures reliable event publishing to Kafka by storing events in the database before publishing.
+> Replace the following section with your Mermaid diagram or architecture image.
 
-Consumer Inbox Pattern
+```mermaid
+flowchart LR
 
-Prevents duplicate Kafka message processing using unique event identifiers.
+Client --> Gateway
 
-Redis Distributed Lock
+Gateway --> Auth
+Gateway --> Wallet
+Gateway --> Transaction
+Gateway --> Agent
 
-Ensures concurrent wallet updates are processed safely without race conditions.
+Transaction --> Kafka
 
-Redis Caching
+Kafka --> Wallet
+Kafka --> Notification
 
-Caches frequently accessed wallet and transaction data to reduce unnecessary database reads.
+Wallet --> Redis
+Wallet --> Database
 
-📁 Project Structure
+Agent --> AI
+
+Prometheus --> Grafana
+Tempo --> Grafana
+```
+
+---
+
+# ✨ Features
+
+## 🔐 Authentication & Security
+
+- User Registration
+- User Login
+- JWT Authentication
+- Spring Security
+- Password Encryption
+- Email OTP
+- SMS OTP
+- Role-Based Authorization
+
+## 💳 Wallet Management
+
+- Wallet Creation
+- Deposit Money
+- Withdraw Money
+- Wallet Balance
+- Transaction History
+- Wallet-to-Wallet Transfer
+
+## 🔄 Distributed Transactions
+
+- Saga Pattern
+- Compensation Transactions
+- Reliable Money Transfer
+- Event-Based Processing
+
+## ⚡ Event-Driven Architecture
+
+- Apache Kafka Producer
+- Apache Kafka Consumer
+- Asynchronous Notifications
+- Decoupled Microservices
+
+## 🚀 Performance
+
+- Redis Caching
+- Redis Distributed Locking
+- API Gateway
+- Scalable Microservices
+
+## 🤖 AI Features
+
+- Spring AI Agent
+- Groq Llama Integration
+- Natural Language Wallet Assistant
+- Python FastAPI Fraud Detection
+
+## 📊 Monitoring
+
+- Prometheus
+- Grafana
+- OpenTelemetry
+- Grafana Tempo
+
+---
+
+# 🧩 Microservices
+
+| Service | Description |
+|---------|-------------|
+| API Gateway | Request routing and JWT validation |
+| Auth Service | Authentication & Authorization |
+| Wallet Service | Wallet operations and caching |
+| Transaction Service | Saga orchestration and transfers |
+| Notification Service | Email & SMS notifications |
+| AI Service | Fraud detection |
+| Agent Service | Spring AI chatbot |
+
+---
+
+# 🛠️ Technology Stack
+
+## Backend
+
+- Java 17
+- Spring Boot
+- Spring Security
+- Spring Cloud Gateway
+- Spring Data JPA
+- Hibernate
+
+## Frontend
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Zustand
+- React Query
+
+## Database
+
+- PostgreSQL
+- MySQL
+- Redis
+
+## Messaging
+
+- Apache Kafka
+- Zookeeper
+
+## AI
+
+- Spring AI
+- Groq API
+- OpenAI API
+- FastAPI
+- Scikit-Learn
+
+## DevOps
+
+- Docker
+- Docker Compose
+- Kubernetes
+- AWS EC2
+
+## Monitoring
+
+- Prometheus
+- Grafana
+- OpenTelemetry
+- Tempo
+
+---
+
+# ⚙️ Design Patterns
+
+### Saga Pattern
+Coordinates distributed transactions across multiple microservices.
+
+### Transactional Outbox Pattern
+Ensures reliable Kafka event publishing.
+
+### Consumer Inbox Pattern
+Prevents duplicate event processing.
+
+### Redis Distributed Lock
+Protects concurrent wallet updates.
+
+### Redis Caching
+Improves read performance by caching frequently accessed data.
+
+---
+
+# 📁 Project Structure
+
+```text
 distributed-wallet-system/
-
+│
 ├── api-gateway/
 ├── auth-service/
 ├── wallet-service/
@@ -150,104 +227,124 @@ distributed-wallet-system/
 ├── k8s/
 ├── docker-compose.yml
 └── README.md
-📸 Screenshots
+```
 
-Add screenshots for:
+---
 
-Login Page
-Dashboard
-Wallet Page
-Transfer Money
-Transaction History
-Swagger UI
-Grafana Dashboard
-Prometheus Metrics
-Kafka UI
-AI Assistant
+# 📸 Screenshots
 
-Example:
+Add screenshots here:
 
-## Dashboard
+- Login Page
+- Dashboard
+- Wallet
+- Money Transfer
+- Transaction History
+- Swagger UI
+- Grafana Dashboard
+- Kafka UI
+- AI Chat Assistant
 
-![Dashboard](docs/dashboard.png)
+---
 
-## Swagger
+# 🚀 Getting Started
 
-![Swagger](docs/swagger.png)
+## Prerequisites
 
-## Grafana
+- Java 17+
+- Maven 3.8+
+- Node.js 18+
+- Python 3.10+
+- Docker Desktop
 
-![Grafana](docs/grafana.png)
-🚀 Getting Started
-Prerequisites
-Java 17+
-Maven 3.8+
-Node.js 18+
-Python 3.10+
-Docker Desktop
-Clone Repository
+## Clone Repository
+
+```bash
 git clone https://github.com/yourusername/distributed-wallet-system.git
-
 cd distributed-wallet-system
-Start Infrastructure
+```
+
+## Start Infrastructure
+
+```bash
 docker compose up -d
-Run Backend Services
+```
 
-Run each Spring Boot service individually:
+## Run Backend
 
+```bash
 mvn spring-boot:run
+```
 
-or use your automation script:
+or
 
+```powershell
 .\start_all_services.ps1
-Run Frontend
+```
+
+## Run Frontend
+
+```bash
 cd consumer-wallet-v2
-
 npm install
-
 npm run dev
+```
 
-Frontend:
+---
 
-http://localhost:5173
-🐳 Deployment
+# 🐳 Deployment
 
-The project supports deployment using:
+Supports deployment using:
 
-Docker Compose
-Kubernetes
-AWS EC2
-📊 Monitoring
+- Docker Compose
+- Kubernetes
+- AWS EC2
 
-Application metrics are collected using Spring Boot Actuator, visualized with Prometheus and Grafana, and distributed traces are captured using OpenTelemetry and Grafana Tempo.
+---
 
-🔮 Future Improvements
-Event Sourcing
-CQRS
-Keycloak Authentication
-ELK Stack Integration
-GitHub Actions CI/CD
-Kubernetes Horizontal Pod Autoscaler
-API Versioning
-Multi-region Deployment
-👨‍💻 Author
+# 📊 Monitoring & Observability
 
-Manikam
+- Spring Boot Actuator
+- Prometheus
+- Grafana
+- OpenTelemetry
+- Grafana Tempo
+
+---
+
+# 🔮 Future Enhancements
+
+- Event Sourcing
+- CQRS
+- Keycloak Authentication
+- ELK Stack
+- GitHub Actions CI/CD
+- Horizontal Pod Autoscaler
+
+---
+
+# 👨‍💻 Author
+
+**Manikam**
 
 Java Backend Developer
 
-Tech Stack
+**Tech Stack**
 
-Java
-Spring Boot
-Spring Security
-Spring Cloud
-Kafka
-Redis
-PostgreSQL
-MySQL
-React
-Docker
-Kubernetes
-AWS
-Spring AI
+- Java
+- Spring Boot
+- Spring Security
+- Spring Cloud
+- Kafka
+- Redis
+- PostgreSQL
+- MySQL
+- React
+- Docker
+- Kubernetes
+- AWS
+- Spring AI
+
+---
+
+⭐ If you found this project useful, consider giving it a star!
