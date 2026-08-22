@@ -2,7 +2,7 @@
 set -e
 
 echo "Starting auth-service..."
-java -Dspring.profiles.active=default \
+java -Xms32m -Xmx64m -Dspring.profiles.active=default \
      -Dserver.port=8093 \
      -Dspring.datasource.url="jdbc:h2:mem:authdb;DB_CLOSE_DELAY=-1;MODE=MySQL" \
      -Dspring.datasource.driver-class-name=org.h2.Driver \
@@ -11,7 +11,7 @@ java -Dspring.profiles.active=default \
      -jar auth-service.jar &
 
 echo "Starting wallet-service..."
-java -Dspring.profiles.active=default \
+java -Xms32m -Xmx64m -Dspring.profiles.active=default \
      -Dserver.port=8091 \
      -Dspring.datasource.url="jdbc:h2:mem:walletdb;DB_CLOSE_DELAY=-1;MODE=MySQL" \
      -Dspring.datasource.driver-class-name=org.h2.Driver \
@@ -21,7 +21,7 @@ java -Dspring.profiles.active=default \
      -jar wallet-service.jar &
 
 echo "Starting transaction-service..."
-java -Dspring.profiles.active=default \
+java -Xms32m -Xmx64m -Dspring.profiles.active=default \
      -Dserver.port=8092 \
      -Dspring.datasource.url="jdbc:h2:mem:txdb;DB_CLOSE_DELAY=-1;MODE=MySQL" \
      -Dspring.datasource.driver-class-name=org.h2.Driver \
@@ -31,7 +31,7 @@ java -Dspring.profiles.active=default \
      -jar transaction-service.jar &
 
 echo "Starting notification-service..."
-java -Dspring.profiles.active=default \
+java -Xms32m -Xmx64m -Dspring.profiles.active=default \
      -Dserver.port=8094 \
      -Dspring.datasource.url="jdbc:h2:mem:notifdb;DB_CLOSE_DELAY=-1;MODE=MySQL" \
      -Dspring.datasource.driver-class-name=org.h2.Driver \
@@ -39,11 +39,11 @@ java -Dspring.profiles.active=default \
      -Dspring.kafka.bootstrap-servers=localhost:9092 \
      -jar notification-service.jar &
 
-echo "Waiting 10 seconds for backend microservices to initialize..."
-sleep 10
+echo "Waiting 8 seconds for backend microservices to initialize..."
+sleep 8
 
 echo "Starting api-gateway on port 8090..."
-exec java -Dspring.profiles.active=default \
+exec java -Xms32m -Xmx96m -Dspring.profiles.active=default \
           -Dserver.port=8090 \
           -Dspring.cloud.gateway.routes[0].id=wallet-service \
           -Dspring.cloud.gateway.routes[0].uri=http://localhost:8091 \
