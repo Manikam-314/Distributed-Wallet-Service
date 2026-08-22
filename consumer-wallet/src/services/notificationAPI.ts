@@ -1,7 +1,8 @@
 import axios from "axios";
+import { API_CONFIG } from "../api/config";
 
 const notifClient = axios.create({
-  baseURL: "http://localhost:8094",
+  baseURL: API_CONFIG.BASE_URL,
   timeout: 5000,
   headers: { "Content-Type": "application/json" },
 });
@@ -28,7 +29,7 @@ export const notificationAPI = {
       const params = new URLSearchParams();
       if (email) params.append("email", email);
       if (mobileNumber) params.append("mobileNumber", mobileNumber);
-      const response = await notifClient.get<InAppNotification[]>(`/api/notifications/user?${params.toString()}`);
+      const response = await notifClient.get<InAppNotification[]>(`/notifications/user?${params.toString()}`);
       return response.data;
     } catch {
       return []; // silently fail if notification service is down
@@ -37,7 +38,7 @@ export const notificationAPI = {
 
   markAsRead: async (id: number): Promise<void> => {
     try {
-      await notifClient.post(`/api/notifications/${id}/read`);
+      await notifClient.post(`/notifications/${id}/read`);
     } catch {
       // ignore
     }
