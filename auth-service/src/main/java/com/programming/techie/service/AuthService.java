@@ -38,10 +38,16 @@ public class AuthService {
         if (existingUser.isPresent()) {
             user = existingUser.get();
             if (user.isVerified()) {
-                throw new RuntimeException("User already exists and is verified");
+                throw new IllegalArgumentException("User with this email already exists and is verified.");
             }
             log.info("Updating existing unverified user: {}", request.getEmail());
         } else {
+            if (request.getMobileNumber() != null && userRepository.findByMobileNumber(request.getMobileNumber()).isPresent()) {
+                UserEntity mobileUser = userRepository.findByMobileNumber(request.getMobileNumber()).get();
+                if (mobileUser.isVerified()) {
+                    throw new IllegalArgumentException("User with this mobile number already exists.");
+                }
+            }
             user = new UserEntity();
         }
 
@@ -55,22 +61,31 @@ public class AuthService {
         UserEntity savedUser = userRepository.save(user);
 
         // ⭐ EMIT USER REGISTERED EVENT VERIFIED TO KAFKA
-        com.programming.techie.events.UserRegisteredEvent userEvent = com.programming.techie.events.UserRegisteredEvent.builder()
-                .userId(savedUser.getId())
-                .timestamp(java.time.Instant.now())
-                .build();
-        kafkaTemplate.send("user-registered-topic", savedUser.getId().toString(), userEvent);
-        log.info("Emitted UserRegisteredEvent for userId: {}", savedUser.getId());
+        try {
+            com.programming.techie.events.UserRegisteredEvent userEvent = com.programming.techie.events.UserRegisteredEvent.builder()
+                    .userId(savedUser.getId())
+                    .timestamp(java.time.Instant.now())
+                    .build();
+            kafkaTemplate.send("user-registered-topic", savedUser.getId().toString(), userEvent);
+            log.info("Emitted UserRegisteredEvent for userId: {}", savedUser.getId());
+        } catch (Exception e) {
+            log.error("Failed to send UserRegisteredEvent to Kafka: {}", e.getMessage());
+        }
 
         // Generate and Send OTP via BOTH channels initially
         String otp = otpService.generateOtp(savedUser.getMobileNumber());
-        com.programming.techie.events.NotificationEvent event = com.programming.techie.events.NotificationEvent.builder()
-                .mobileNumber(savedUser.getMobileNumber())
-                .email(savedUser.getEmail())
-                .message("Welcome to Distributed Wallet! Your OTP for registration is: " + otp)
-                .deliveryChannel("BOTH")
-                .build();
-        kafkaTemplate.send("notificationTopic", event);
+        try {
+            com.programming.techie.events.NotificationEvent event = com.programming.techie.events.NotificationEvent.builder()
+                    .mobileNumber(savedUser.getMobileNumber())
+                    .email(savedUser.getEmail())
+                    .message("Welcome to Distributed Wallet! Your OTP for registration is: " + otp)
+                    .deliveryChannel("BOTH")
+                    .build();
+            kafkaTemplate.send("notificationTopic", event);
+            log.info("Emitted NotificationEvent to Kafka for userId: {}", savedUser.getId());
+        } catch (Exception e) {
+            log.error("Failed to send NotificationEvent to Kafka: {}", e.getMessage());
+        }
     }
 
     // Wallet service is now event-driven. Retries are managed automatically by Kafka DLQ configurations.
@@ -129,8 +144,12 @@ public class AuthService {
                 .deliveryChannel(channel)
                 .build();
 
-        kafkaTemplate.send("notificationTopic", event);
-        log.info("Resent OTP to {} via {}", email, channel);
+        try {
+            kafkaTemplate.send("notificationTopic", event);
+            log.info("Resent OTP to {} via {}", email, channel);
+        } catch (Exception e) {
+            log.error("Failed to resend OTP to Kafka: {}", e.getMessage());
+        }
     }
 
     public UserDTO getUserById(Long userId) {
