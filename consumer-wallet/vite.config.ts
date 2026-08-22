@@ -5,15 +5,11 @@ import path from "node:path"
 
 // https://vite.dev/config/
 export default defineConfig({
+  root: __dirname,
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  build: {
-    rollupOptions: {
-      input: path.resolve(__dirname, "index.html"),
     },
   },
 })
