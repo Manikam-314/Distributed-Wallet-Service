@@ -42,6 +42,7 @@ build/
 *.log
 *.txt
 *.html
+!**/index.html
 *.png
 
 ### Docker Database & Volume Data ###
