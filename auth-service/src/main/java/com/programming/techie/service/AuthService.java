@@ -32,31 +32,28 @@ public class AuthService {
     private final String WALLET_SERVICE_URL = "http://localhost:8091";
 
     public void register(RegisterRequest request) {
-        java.util.Optional<UserEntity> existingUser = userRepository.findByEmail(request.getEmail());
-        
-        UserEntity user;
-        if (existingUser.isPresent()) {
-            user = existingUser.get();
-            if (user.isVerified()) {
-                throw new IllegalArgumentException("User with this email already exists and is verified.");
-            }
-            log.info("Updating existing unverified user: {}", request.getEmail());
-        } else {
-            if (request.getMobileNumber() != null && userRepository.findByMobileNumber(request.getMobileNumber()).isPresent()) {
-                UserEntity mobileUser = userRepository.findByMobileNumber(request.getMobileNumber()).get();
-                if (mobileUser.isVerified()) {
-                    throw new IllegalArgumentException("User with this mobile number already exists.");
-                }
-            }
-            user = new UserEntity();
+        java.util.Optional<UserEntity> existingByEmail = userRepository.findByEmail(request.getEmail());
+        java.util.Optional<UserEntity> existingByMobile = request.getMobileNumber() != null
+                ? userRepository.findByMobileNumber(request.getMobileNumber())
+                : java.util.Optional.empty();
+
+        if (existingByEmail.isPresent() && existingByEmail.get().isVerified()) {
+            throw new IllegalArgumentException("User with this email already exists.");
         }
+
+        if (existingByMobile.isPresent() && existingByMobile.get().isVerified()) {
+            throw new IllegalArgumentException("User with this mobile number already exists.");
+        }
+
+        // Reuse existing unverified user record if present to avoid duplicate key errors
+        UserEntity user = existingByEmail.orElseGet(() -> existingByMobile.orElseGet(UserEntity::new));
 
         user.setEmail(request.getEmail());
         user.setName(request.getName());
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setMobileNumber(request.getMobileNumber());
         user.setRole("USER");
-        user.setVerified(false); // Ensure it's false initially
+        user.setVerified(false);
 
         UserEntity savedUser = userRepository.save(user);
 
