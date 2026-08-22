@@ -5,9 +5,13 @@ metadata:
   namespace: distributed-wallet
 data:
   SPRING_PROFILES_ACTIVE: prod
-  DB_HOST: mysql
+
+  DB_HOST: wallet-mysql-db.cuvkmcs8i5hn.us-east-1.rds.amazonaws.com
   DB_PORT: "3306"
-  REDIS_HOST: redis
+
+  REDIS_HOST: wallet-redis-symft9.serverless.use1.cache.amazonaws.com
   REDIS_PORT: "6379"
+
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
   ZIPKIN_URL: http://tempo:9411

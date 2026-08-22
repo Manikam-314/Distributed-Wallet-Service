@@ -1,0 +1,481 @@
+100 Interview Questions & Answers — Distributed Fintech Wallet System
+🏗️ Section 1: Architecture & System Design (Q1–Q20)
+Q1. Can you give a high-level overview of your project?
+Answer: I built an enterprise-grade Distributed Fintech Wallet System using a microservices architecture with 7 independently deployable services: API Gateway (port 8090), Auth Service (8093), Wallet Service (8091), Transaction Service (8092), Notification Service (8094), Agent Service (9100), and AI Service (8095). The system handles wallet provisioning, peer-to-peer money transfers, real-time fraud detection, and an AI-powered conversational assistant. Communication between services is event-driven using Apache Kafka, with Redis for caching and distributed locking, MySQL as the primary database, and the entire stack is containerized with Docker Compose and deployable to AWS EC2 and Kubernetes.
+
+Q2. Why did you choose a microservices architecture instead of a monolith?
+Answer: A fintech wallet platform has inherently distinct bounded contexts — authentication, wallet management, transaction orchestration, notifications, and AI — each with different scaling, deployment, and failure profiles. Microservices allow independent scaling (the wallet-service handles more load than the notification-service), independent deployability (I can patch auth without redeploying the transaction pipeline), technology heterogeneity (the AI service is Python/FastAPI while the core is Java/Spring Boot), and fault isolation (if the notification-service goes down, money transfers still complete). The tradeoff is distributed complexity, which I address with the Saga pattern, Outbox pattern, and observability tooling.
+
+Q3. How do the microservices communicate with each other?
+Answer: Communication is split into two models:
+
+Synchronous (REST): The API Gateway routes HTTP requests to downstream services. The Transaction Service calls the Wallet Service via WebClient for balance checks and wallet lookups. The Agent Service calls the API Gateway to interact with wallet and transaction services.
+Asynchronous (Kafka Events): All state-changing cross-service operations use Kafka. Transaction creation publishes a TransactionCreatedEvent to the transaction-created topic. The Wallet Service consumes it, debits the sender, and publishes a TransactionProcessedEvent. The Transaction Service then credits the receiver or triggers compensation. Notifications are fully asynchronous via the notificationTopic.
+Q4. What is the role of the API Gateway in your system?
+Answer: The API Gateway (Spring Cloud Gateway) acts as the single entry point for all client requests. It performs:
+
+JWT Authentication: The AuthenticationFilterGatewayFilterFactory validates JWT tokens and extracts userId from claims, injecting it as loggedInUserId header into downstream requests.
+Dynamic Routing: Routes requests to the correct microservice based on path prefixes (/api/wallets → wallet-service, /api/transactions → transaction-service).
+Correlation ID Injection: The CorrelationIdGatewayFilter (a GlobalFilter) generates a UUID X-Correlation-ID and propagates it to all downstream services for distributed tracing.
+CORS Handling: Configured to allow the React frontend at localhost:5173.
+Security Bypass: Public endpoints like /auth/register, /auth/login, /auth/verify-otp skip JWT validation.
+Q5. How does the API Gateway handle JWT authentication?
+Answer: The AuthenticationFilterGatewayFilterFactory extends AbstractGatewayFilterFactory. On each request:
+
+It checks if the path matches a public endpoint (register, login, verify-otp). If yes, it skips auth.
+For secured endpoints, it checks for the Authorization header. If missing, it returns 401 Unauthorized.
+It strips the Bearer  prefix and validates the token using JwtUtils.isInvalid().
+On success, it extracts Claims from the JWT, reads the userId claim, and mutates the request to inject loggedInUser (email/subject) and loggedInUserId headers. This way, downstream services never need to parse the JWT themselves — they just read the header.
+Q6. Explain the Correlation ID pattern you implemented.
+Answer: The CorrelationIdGatewayFilter implements GlobalFilter with Ordered.HIGHEST_PRECEDENCE so it runs before all other filters. It checks if the incoming request already has an X-Correlation-ID header. If not, it generates a UUID. It then mutates the request to inject this header downstream, and also adds it to the response headers so the client can trace the request. This ID flows through all Kafka events and service logs, enabling end-to-end distributed tracing across the entire request lifecycle.
+
+Q7. What databases do you use and why?
+Answer:
+
+MySQL 8: Primary persistent store for all services (users, wallets, transactions, outbox events, saga state). Chosen for ACID compliance, which is critical in financial systems.
+Redis 7: Used for three purposes: (1) Write-through caching of wallet balances via @Cacheable, reducing DB reads by ~95%; (2) Distributed locking using SETNX with TTL for concurrent wallet operations; (3) Chat memory for the AI agent's conversation history with 30-minute TTL.
+Q8. How is your project structured as a Maven multi-module project?
+Answer: The root pom.xml uses <packaging>pom</packaging> and declares 7 modules: wallet-service, transaction-service, auth-service, api-gateway, common-events, notification-service, and agent-service. It inherits from spring-boot-starter-parent:3.2.5 and defines shared dependency management for Micrometer (1.12.5), Micrometer Tracing (1.2.5), OpenTelemetry (1.31.0), and Resilience4j (2.1.0) BOMs. The common-events module contains shared DTOs and Kafka event schemas that other modules depend on, avoiding code duplication.
+
+Q9. What is the common-events module and why does it exist?
+Answer: common-events is a shared library module containing all Kafka event classes like TransactionCreatedEvent, TransactionProcessedEvent, WalletCompensationEvent, WalletCreditEvent, NotificationEvent, UserRegisteredEvent, and CompensationCompletedEvent. It also contains shared observability utilities. This module is declared as a Maven dependency in other services, ensuring schema consistency across producers and consumers. Without it, each service would define its own event classes, leading to deserialization failures and contract drift.
+
+Q10. How does your Docker Compose file orchestrate the entire system?
+Answer: The docker-compose.yml defines 3 layers:
+
+Infrastructure: MySQL (port 3307→3306), Redis (6379), Zookeeper (2181), Kafka (9092) — all with health checks.
+Observability: Prometheus (9090), Grafana (3000), Grafana Tempo (3200, 4317, 4318).
+Application Services: All 7 microservices + the React frontend.
+Services use depends_on with condition: service_healthy for infrastructure and condition: service_started for application dependencies. For example, transaction-service depends on mysql (healthy), redis (healthy), kafka (started), and wallet-service (started). All services use restart: on-failure for self-healing. Named volumes persist data across restarts.
+
+Q11. How do you handle service-to-service authentication?
+Answer: The API Gateway validates the JWT once and injects loggedInUserId as a header. Downstream services trust the gateway and read this header directly. The Agent Service has its own JwtAuthenticationFilter that validates the JWT independently since it also accepts direct requests. For inter-service calls (e.g., Agent Service → API Gateway → Wallet Service), the original bearer token is forwarded via the Authorization header, extracted from RequestContextHolder.getRequestAttributes().
+
+Q12. What Spring Boot version and Java version are you using? Why?
+Answer: Spring Boot 3.2.5 with Java 17. Spring Boot 3.x requires Java 17+ and provides native support for Jakarta EE (replacing javax), virtual threads, GraalVM native images, and Spring AI integration. Java 17 is the latest LTS with records, sealed classes, text blocks, and pattern matching — all of which I use (e.g., record BalanceRequest(Long userId) in BalanceTool, text blocks for system prompts in AgentService).
+
+Q13. How would you scale a specific microservice independently?
+Answer: Using Docker Compose, I can scale with docker compose up --scale wallet-service=3. In Kubernetes, I define replicas in the deployment spec. The key consideration is Kafka consumer group rebalancing — if I scale wallet-service to 3 instances, all in the wallet-group consumer group, Kafka partitions are automatically rebalanced across them. For the Transaction Service (Saga Orchestrator), I use the Outbox table with SKIP LOCKED queries, so multiple instances can poll concurrently without processing the same event.
+
+Q14. How do you handle configuration management across environments?
+Answer: Each service uses Spring application.yml with profile-based configuration. The SPRING_PROFILES_ACTIVE=docker environment variable activates the Docker profile. In Docker Compose, environment variables override properties: DB_USERNAME, DB_PASSWORD, GATEWAY_URL, REDIS_HOST, KAFKA_BROKERS, JWT_SECRET. For the AI Service (Python), configuration is in .env files. Sensitive values like JWT_SECRET and GEMINI_PROJECT_ID use ${ENV_VAR:-default} syntax for safe defaults.
+
+Q15. How does the frontend communicate with the backend?
+Answer: The React 19 frontend (Vite + TypeScript + Zustand + React Query) communicates exclusively through the API Gateway at port 8090. It sends JWT tokens in the Authorization header. Zustand manages global state (auth, wallet), React Query handles API caching and automatic refetching. The frontend never calls microservices directly — all traffic flows through the gateway for security and routing.
+
+Q16. Explain the event flow for a complete money transfer.
+Answer:
+
+User → Gateway → Transaction Service: REST call with sender/receiver wallet IDs and amount.
+Transaction Service: Validates idempotency, checks balance from Redis cache, saves Transaction (PENDING), creates TransferSaga (INITIATED), writes TransactionCreatedEvent to the Outbox table.
+Outbox Publisher: Polls outbox, publishes to Kafka transaction-created topic.
+Wallet Service (Consumer): Inbox check (idempotency), debits sender wallet, acquires Redis lock, publishes TransactionProcessedEvent (SUCCESS/FAILED) to transaction-processed topic.
+Transaction Service (Saga Consumer): On SUCCESS → updates saga to COMPLETED, writes WalletCreditEvent to outbox for receiver. On FAILED → updates saga to COMPENSATING, writes WalletCompensationEvent to outbox.
+Wallet Service: Credits receiver wallet (on success) or refunds sender (on compensation).
+Notification Service: Receives NotificationEvent from Kafka, sends SMS/Email.
+Q17. What happens if the API Gateway goes down?
+Answer: All client traffic stops since the gateway is the single entry point. However, in-flight Kafka events continue processing — the Wallet Service still processes pending debits/credits, the Saga orchestrator still handles compensation. To mitigate this single point of failure, in production I would: (1) run multiple gateway instances behind an AWS ALB/NLB, (2) use Kubernetes with replicas: 3 and a Service load balancer, (3) add health checks and circuit breakers on the client side.
+
+Q18. How do you handle IDOR (Insecure Direct Object Reference) attacks?
+Answer: In the Transaction Service transfer() method, after receiving senderWalletId, I fetch the wallet and verify senderWallet.getUserId().equals(loggedInUserId). If they don't match, I throw "Unauthorized: You do not own the sender wallet." This prevents a user from specifying someone else's wallet ID as the sender. The loggedInUserId is injected by the gateway from the validated JWT, so it cannot be tampered with.
+
+Q19. What is the tech stack for the AI components?
+Answer: Two separate services:
+
+Agent Service (Java/Spring AI): Uses Spring AI's ChatClient with Groq Cloud (Llama 3.3 70B) as the LLM provider. Implements native function calling via @Tool annotations. Chat memory is stored in Redis with 30-minute TTL.
+AI Service (Python/FastAPI): Handles real-time fraud scoring using a Random Forest classifier (Scikit-Learn), NLP intent extraction, and budget categorization. Called synchronously by the Transaction Service for fraud checks.
+Q20. How do you deploy to AWS?
+Answer: The repository includes PowerShell automation scripts. aws-setup.ps1 provisions a t3.large Ubuntu EC2 instance, maps an Elastic IP, configures security groups (opens ports for all services), installs Docker, and deploys using docker-compose.ec2.yml. aws-stop.ps1 stops the instance to save costs, aws-resume.ps1 restarts it, and aws-pause.ps1 suspends without terminating. The EC2 deployment uses the same Docker Compose setup with adjusted hostnames and environment variables.
+
+🔄 Section 2: Distributed Transactions & Saga Pattern (Q21–Q35)
+Q21. What is the Saga pattern and why did you need it?
+Answer: The Saga pattern manages distributed transactions across multiple microservices without a global 2PC (two-phase commit). In my system, a money transfer spans transaction-service (orchestrator), wallet-service (debit sender, credit receiver), and notification-service. If any step fails — say crediting the receiver — the Saga executes compensating actions (refund the sender). I chose the Orchestration variant where the transaction-service acts as the central coordinator, directing each step and handling failures, rather than Choreography where each service decides the next step independently.
+
+Q22. How does your Saga Orchestrator work?
+Answer: The TransactionService.transfer() method creates a TransferSaga entity with status INITIATED and saves it alongside the transaction. It writes a TransactionCreatedEvent to the Outbox table. The outbox publisher sends it to Kafka. After wallet-service processes the debit, it publishes a TransactionProcessedEvent. The TransactionProcessedConsumer in transaction-service listens on transaction-processed topic:
+
+On SUCCESS: Sets saga status to COMPLETED, writes a WalletCreditEvent to outbox for the receiver.
+On FAILED: Sets saga status to COMPENSATING, writes a WalletCompensationEvent to outbox for the sender refund.
+Q23. What is the TransferSaga entity?
+Answer: It tracks the lifecycle of a distributed transfer:
+
+java
+
+TransferSaga {
+    Long id;
+    Long transactionId;
+    SagaStatus status;     // INITIATED, COMPLETED, COMPENSATING, COMPENSATED, FAILED
+    Instant createdAt;
+    Instant updatedAt;
+}
+SagaStatus is an enum. The saga record persists in the database, providing an audit trail and enabling recovery if the orchestrator crashes mid-saga.
+
+Q24. What are compensating transactions? Give an example from your project.
+Answer: Compensating transactions undo the effect of a previously committed step. In my project: if the sender's wallet is debited successfully but crediting the receiver fails (e.g., receiver wallet not found), the TransactionProcessedConsumer writes a WalletCompensationEvent to the outbox. The CompensationConsumer in wallet-service receives it and calls walletService.compensate(), which credits the amount back to the sender's wallet with type COMPENSATION. It also checks compensationLogRepository to ensure idempotency — the same compensation isn't applied twice.
+
+Q25. How do you prevent a compensation from being applied multiple times?
+Answer: In WalletService.compensate(), the first thing I do is check compensationLogRepository.findByTransactionId(transactionId). If a record exists, I log a warning and return immediately. This prevents double-refunds from Kafka retries or network duplicates. The compensation is then executed as a credit() with type "COMPENSATION", and the credit method itself has its own idempotency check using idempotencyRepository.existsById("CREDIT_" + transactionId).
+
+Q26. What is the Transactional Outbox pattern and why is it critical?
+Answer: The Outbox pattern solves the dual-write problem: when you need to both commit to a database AND publish to Kafka, if the DB commits but Kafka publish fails (or vice versa), you get inconsistency. My solution: I save the business data AND an OutboxEvent record (with published=false) in the same database transaction. An async outbox publisher polls for unpublished events using SELECT ... FOR UPDATE SKIP LOCKED, publishes them to Kafka, waits for broker acknowledgment, and then marks published=true. This guarantees at-least-once delivery without split-brain scenarios.
+
+Q27. What is the OutboxEvent entity structure?
+Answer:
+
+java
+
+OutboxEvent {
+    Long id;
+    String aggregateType;    // e.g., "TRANSACTION"
+    String aggregateId;      // Wallet ID — used as Kafka partition key
+    String topic;            // Target Kafka topic
+    String payload;          // JSON-serialized event
+    boolean published;       // false until confirmed by Kafka
+    Instant createdAt;
+}
+The aggregateId is deliberately set to the wallet ID so that all events for the same wallet land on the same Kafka partition, ensuring ordering guarantees per wallet.
+
+Q28. What does SKIP LOCKED mean in the outbox publisher?
+Answer: SKIP LOCKED is a SQL clause that tells the query to skip rows that are currently locked by another transaction rather than waiting. This enables concurrent outbox publishers — if I scale the transaction-service to 3 instances, each polls the outbox table. Without SKIP LOCKED, they'd block each other. With it, each instance grabs a different batch of unpublished events, preventing duplicates and enabling horizontal scaling of the publisher.
+
+Q29. What is the Consumer Inbox pattern?
+Answer: Since Kafka guarantees at-least-once delivery, the same event might be delivered multiple times (network retries, consumer rebalances). The Inbox pattern prevents duplicate processing. In my TransactionConsumer, before processing a TransactionCreatedEvent, I check processedRepo.existsById(txnId). If the transaction ID exists in the ProcessedEvent table, I skip it. If not, I process the transaction AND save the ID to the inbox table in the same database transaction (@Transactional). This makes consumption idempotent.
+
+Q30. How do you handle idempotency in the Transaction Service?
+Answer: Two layers:
+
+API-level: The transfer() method accepts an idempotencyKey parameter (UUID). Before processing, it checks idempotencyRepository.existsById(idempotencyKey). If it exists, it throws DuplicateTransactionException. After successful processing, it saves the key. This prevents duplicate API calls from the frontend or AI agent.
+Kafka-level: The TransactionConsumer in wallet-service uses the Inbox pattern (ProcessedEvent table) to prevent duplicate event processing.
+Q31. What happens if the Kafka broker crashes after DB commit but before the event is published?
+Answer: Nothing is lost. The TransactionCreatedEvent was saved to the Outbox table in the same DB transaction as the business data. When Kafka recovers, the outbox publisher picks up the unpublished event (where published=false) and publishes it. This is exactly why the Outbox pattern exists — to decouple the "publish" action from the "commit" action.
+
+Q32. How do you ensure ordering of events per wallet?
+Answer: When creating the OutboxEvent, I set aggregateId to the wallet ID. The outbox publisher uses this as the Kafka partition key. Since Kafka guarantees ordering within a partition, all events for wallet #42 land on the same partition and are processed in order. This prevents race conditions like "credit before debit" for the same wallet.
+
+Q33. What is the Dead Letter Queue (DLQ) implementation?
+Answer: The DLQConsumer listens on transaction-created.DLT (Dead Letter Topic). When a Kafka consumer fails to process a message after max retries (configured in Kafka consumer config), the message is routed to the DLT. My DLQ consumer serializes the failed payload, creates a FailedEvent entity with the original topic, error reason ("Max retries exceeded"), retry count, and timestamp, then persists it to the database for manual investigation. It also increments DLQ metrics via KafkaMetricsService for monitoring alerts.
+
+Q34. How do you track Kafka consumer metrics?
+Answer: I have a KafkaMetricsService that tracks four counters: total, success, failure, and dlq. The TransactionConsumer calls incrementTotal() on every event, incrementSuccess() on successful processing, and incrementFailure() on exceptions. The DLQConsumer calls incrementDLQ(). These metrics are exposed via Prometheus/Actuator for Grafana dashboards, enabling real-time monitoring of event processing success rates.
+
+Q35. What is the difference between Saga Orchestration and Choreography? Why did you pick Orchestration?
+Answer:
+
+Choreography: Each service publishes events and other services react. No central coordinator. Pros: simpler, loosely coupled. Cons: hard to debug, implicit flow, cyclic dependencies.
+Orchestration: A central coordinator (Transaction Service) directs each step. Pros: explicit flow, easy to add/remove steps, centralized error handling. Cons: single point of orchestration.
+I chose Orchestration because money transfers are mission-critical and I need explicit control over the compensation flow. If the credit step fails, the orchestrator immediately triggers a refund — it doesn't rely on each service to "figure it out" via events. The TransferSaga entity provides a clear audit trail of exactly where the saga is in its lifecycle.
+
+🔐 Section 3: Security & Authentication (Q36–Q45)
+Q36. How does your authentication system work?
+Answer: The AuthService handles registration and login. During registration, the user's password is hashed with PasswordEncoder (BCrypt), a UserEntity is saved, a UserRegisteredEvent is published to Kafka (which triggers wallet creation in wallet-service), and an OTP is generated and sent via Kafka to the notification-service. During login, the email is looked up, the password is verified with passwordEncoder.matches(), and a JWT is generated using JwtUtil.generateToken(email, userId) containing the user's email as subject and userId as a claim.
+
+Q37. How do you generate and validate JWTs?
+Answer: JwtUtil uses the io.jsonwebtoken (JJWT) library. Token generation: Jwts.builder().setSubject(email).claim("userId", userId).setIssuedAt(now).setExpiration(now + 24h).signWith(secretKey, SignatureAlgorithm.HS256).compact(). Validation: JwtUtils.isInvalid(token) attempts to parse the token with the same secret key — if parsing throws an exception (expired, malformed, wrong signature), it returns true. The secret key is configurable via JWT_SECRET environment variable with a safe default.
+
+Q38. How does OTP verification work?
+Answer: The OtpService generates a 6-digit random OTP, creates an OtpEntity with the mobile number, OTP value, and expiry time (5 minutes from now), and saves it to the database. Verification checks: (1) find the latest OTP for the mobile number (findTopByMobileNumberOrderByExpiryTimeDesc), (2) compare the OTP values, (3) check expiry hasn't passed, (4) check it hasn't been used before (!isVerified()). On success, the OTP is marked as verified and the user entity is marked as verified.
+
+Q39. How do you deliver OTPs to users?
+Answer: OTPs are sent asynchronously via Kafka. The auth-service publishes a NotificationEvent to the notificationTopic with deliveryChannel: "BOTH". The notification-service consumes this and routes to SmsService (Twilio API with Basic Auth) and/or EmailService (SMTP via Spring Mail). This decouples the auth flow from notification delivery — registration completes immediately, OTP delivery happens asynchronously.
+
+Q40. How does the Agent Service authenticate requests?
+Answer: The Agent Service has its own JwtAuthenticationFilter (a OncePerRequestFilter) that extracts the JWT from the Authorization header, validates it using JwtUtils, extracts the userId claim, creates a UsernamePasswordAuthenticationToken with ROLE_USER authority, and sets it in the SecurityContextHolder. The SecurityConfig permits /actuator/** and requires authentication for everything else. This is necessary because the agent-service receives direct requests (not routed through the API Gateway in some configurations).
+
+Q41. How do you prevent self-transfers?
+Answer: Two checks: In TransactionService.transfer(), I explicitly check if (senderWalletId.equals(receiverWalletId)) and throw "Cannot transfer money to yourself." In ConditionalTriggerTool.registerConditionalTrigger(), I check if (senderWallet.id().equals(receiverWallet.id())) and return "You cannot schedule triggers to transfer money to yourself." Both frontend and backend enforce this constraint.
+
+Q42. How do you secure the Twilio SMS integration?
+Answer: The SmsService uses Twilio's REST API with HTTP Basic Auth. The accountSid and authToken are injected from application.yml properties (@Value("${twilio.account-sid}")). Credentials are Base64-encoded and sent in the Authorization: Basic header. In production, these values come from environment variables or secrets management (never committed to source code). The service catches all exceptions gracefully — SMS failure never breaks the main transaction flow.
+
+Q43. What security headers does the gateway inject?
+Answer: After JWT validation, the gateway mutates the downstream request to include: loggedInUser (the JWT subject, typically email) and loggedInUserId (the userId claim from the JWT). These headers are trusted by downstream services because they originate from the gateway after authentication. The original JWT is also forwarded via the Authorization header for services that need to make further authenticated calls.
+
+Q44. How does the Agent Service securely invoke wallet operations?
+Answer: Each tool (BalanceTool, TransferMoneyTool) extracts the bearer token from the current HTTP request using RequestContextHolder.getRequestAttributes(). This token is then forwarded to the API Gateway when calling wallet/transaction endpoints. The request flow is: Client → Agent Service (JWT validated) → API Gateway (JWT validated again) → Wallet Service. The userId is also injected into the LLM's system prompt: "AUTHENTICATED USER ID: %d", ensuring tools always operate on the correct user's behalf.
+
+Q45. How do you handle password security?
+Answer: Passwords are hashed using Spring Security's PasswordEncoder (BCrypt). During registration, passwordEncoder.encode(request.getPassword()) produces a one-way hash. During login, passwordEncoder.matches(rawPassword, hashedPassword) compares without ever decrypting. BCrypt includes a random salt in each hash, so identical passwords produce different hashes. The raw password is never stored or logged.
+
+💰 Section 4: Wallet Service Deep Dive (Q46–Q60)
+Q46. How does wallet creation work?
+Answer: Wallet creation is event-driven. When a user registers, the auth-service publishes a UserRegisteredEvent to the user-registered-topic. The UserRegisteredConsumer in wallet-service listens and calls walletService.createWallet(userId). The method uses findFirstByUserId() with ifPresentOrElse — if a wallet already exists (idempotency), it skips creation. If concurrent events try to create wallets simultaneously, the DataIntegrityViolationException is caught and handled gracefully. The wallet is initialized with BigDecimal.ZERO balance.
+
+Q47. What is the "lazy wallet healing" pattern you implemented?
+Answer: In getWalletByUserId(), if no wallet is found, instead of throwing an exception, I resiliently create one with zero balance. This handles edge cases where the UserRegisteredEvent was lost or the wallet-service was down during registration. It catches DataIntegrityViolationException for concurrent creation race conditions and retries the find. This ensures the system self-heals rather than permanently failing for a user whose wallet creation event was lost.
+
+Q48. How does the distributed lock work for wallet operations?
+Answer: The RedisLockService uses Redis SETNX (Set If Not Exists) with a 10-second TTL. acquireLock(walletId) generates a random UUID as the lock value and calls redisTemplate.opsForValue().setIfAbsent(key, lockValue, 10, TimeUnit.SECONDS). If successful, it returns the lock value. releaseLock() uses a Lua script to atomically check that the lock value matches before deleting — this prevents accidentally releasing another process's lock. The Lua script: if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end.
+
+Q49. Why use a Lua script for lock release instead of simple DELETE?
+Answer: Without the Lua script, a race condition exists: Process A's lock expires (TTL), Process B acquires a new lock, then Process A does DELETE and accidentally removes Process B's lock. The Lua script is atomic — it checks that the stored value matches the caller's UUID before deleting, all in a single Redis operation. This is the industry-standard Redis distributed lock pattern (Redlock algorithm's core principle).
+
+Q50. How does the write-through cache work for balances?
+Answer: Two mechanisms:
+
+Read caching: getBalance() is annotated with @Cacheable(value = "wallet:balance", key = "#walletId"). The first call hits the DB; subsequent calls return the cached value from Redis.
+Write-through updates: After every debit(), credit(), or deposit(), the updateBalanceCacheAtomic() method reads the current cached value, adds the delta, and writes the new value back to Redis. This keeps the cache consistent with the DB without waiting for cache expiration. The cache key format is wallet:balance::<walletId>.
+Q51. How do you handle different data types in Redis cache reads?
+Answer: In updateBalanceCacheAtomic(), the cached value might be deserialized as different types depending on the Redis serializer. I handle all cases: if (existing instanceof BigDecimal) → cast directly; if (existing instanceof Double) → BigDecimal.valueOf((Double) existing); if (existing instanceof Integer) → same pattern; if (existing instanceof String) → new BigDecimal((String) existing). This defensive coding prevents ClassCastException across different Redis serialization configurations.
+
+Q52. What is the Ledger Entry and how does it relate to Event Sourcing?
+Answer: The LedgerEntry records every balance-affecting operation:
+
+java
+
+LedgerEntry { Long id; Long walletId; BigDecimal amount; String type; /* DEBIT, CREDIT, COMPENSATION */ }
+Every debit saves a negative amount entry, every credit saves a positive amount entry. The wallet's balance can be reconstructed by summing all ledger entries: ledgerRepository.calculateBalance(walletId). This is Event Sourcing lite — the ledger is the source of truth, and the WalletEntity.balance field is a materialized view for fast reads.
+
+Q53. What is the snapshotting mechanism?
+Answer: After every 10 ledger entries (eventCount % 10 == 0), checkAndCreateSnapshot() creates a WalletSnapshot with the current calculated balance and the last event ID. When rebuilding balance from events (rebuildBalanceFromEvents()), instead of summing ALL ledger entries from the beginning, the system finds the latest snapshot, takes its balance, and only sums entries AFTER snapshot.lastEventId. This reduces rebuild time from O(n) to O(k) where k is the number of events since the last snapshot.
+
+Q54. How does the debit operation work with all safety checks?
+Answer: debit() in WalletService follows this sequence:
+
+Rate limiting: rateLimitService.checkRateLimit(walletId) — prevents abuse.
+Fraud detection: fraudDetectionService.checkFraud(walletId) — calls the AI service.
+Acquire Redis lock: redisLockService.acquireLock(walletId) — if null, throw "Wallet is busy."
+Load wallet, check balance: Throws "Insufficient balance" if negative.
+Create LedgerEntry with negative amount and type "DEBIT."
+Update wallet balance and save.
+Update Redis cache atomically.
+Create snapshot if threshold reached.
+Release Redis lock in finally block (always runs).
+The method is annotated with @Bulkhead, @RateLimiter, and @TimeLimiter from Resilience4j.
+
+Q55. What Resilience4j patterns do you use on the debit operation?
+Answer: Three patterns:
+
+@Bulkhead(name = "walletService"): Limits concurrent calls to prevent thread exhaustion. If max concurrent calls are reached, new calls are rejected.
+@RateLimiter(name = "walletService"): Limits the rate of calls per time window (e.g., 10 calls/second). Prevents abuse and protects downstream systems.
+@TimeLimiter(name = "walletService"): Sets a timeout for the operation. If the debit takes too long (e.g., Redis lock contention), it times out rather than hanging indefinitely.
+Q56. How does the balance cache get invalidated?
+Answer: It doesn't get explicitly invalidated — it uses a write-through strategy. Every deposit(), debit(), and credit() call updateBalanceCacheAtomic() which reads the current cached value and adds the delta. The RedisBalanceService.setBalance() sets a 10-minute TTL, so even if the write-through fails, the cache auto-expires and the next read repopulates from the DB. There's also an evictBalance() method that deletes the cache key for manual cache busting.
+
+Q57. How does the Transaction Service check balance without calling Wallet Service synchronously?
+Answer: The Transaction Service reads the balance from Redis cache directly: getBalanceFromCache(walletId) reads from key wallet:balance::<walletId>. This is the same cache that the Wallet Service maintains via write-through updates. If the cache is missing (cold start, TTL expired), it falls back to a synchronous walletClient.getBalance(walletId) call. This reduces inter-service latency from ~50ms (HTTP) to ~2ms (Redis) for the common case.
+
+Q58. What entities exist in the Wallet Service?
+Answer: Seven entities:
+
+WalletEntity — userId, balance (BigDecimal)
+LedgerEntry — walletId, amount, type (DEBIT/CREDIT/COMPENSATION)
+WalletSnapshot — walletId, balance, lastEventId (for event sourcing snapshots)
+CompensationLog — transactionId (prevents duplicate compensations)
+IdempotencyRecord — idempotencyKey, serviceName, processedAt
+ProcessedEvent — eventId (Inbox pattern for Kafka idempotency)
+FailedEvent — originalTopic, payload, errorReason, retryCount, failedAt (DLQ persistence)
+Q59. How do Kafka consumers in wallet-service work?
+Answer: Five consumers:
+
+TransactionConsumer — listens on transaction-created, debits sender wallet (Inbox pattern).
+CompensationConsumer — listens on wallet-compensation-requested, refunds sender wallet.
+WalletCreditConsumer — listens on wallet-credit, credits receiver wallet.
+UserRegisteredConsumer — listens on user-registered-topic, creates new wallet.
+DLQConsumer — listens on transaction-created.DLT, persists failed events.
+All use groupId = "wallet-group" (except DLQ which uses wallet-dlq-group) for consumer group coordination.
+
+Q60. What is the FraudDetectionService in wallet-service?
+Answer: It's a lightweight integration that calls the Python AI Service's fraud scoring endpoint before processing a debit. It sends transaction metadata (wallet ID, amount, velocity) and receives a fraud score. If the score exceeds a threshold, the debit is blocked. This is a synchronous check during the debit flow. The AI Service uses a Random Forest classifier trained on transaction patterns to flag suspicious payments in real-time.
+
+🤖 Section 5: AI Agent Service (Q61–Q75)
+Q61. What is the Agent Service and how does it work?
+Answer: The Agent Service is a Spring AI-based conversational assistant that lets users interact with their wallets using natural language. Users can say "What is my balance?" or "Send ₹500 to John." It uses Groq Cloud (Llama 3.3 70B) as the LLM provider. The AgentService injects the authenticated userId into the system prompt, passes the user's message to the LLM along with registered @Tool functions, and the LLM decides which tools to invoke. The response is returned as structured ChatResponse with requestId, status, and execution time.
+
+Q62. What is Spring AI's function calling (Tool) mechanism?
+Answer: Spring AI's @Tool annotation marks a method as callable by the LLM. I define tools like BalanceTool.getBalance(), TransferMoneyTool.transferMoney(), etc. with rich descriptions. When the user says "Check my balance," the LLM parses the intent, identifies the getBalance tool, constructs the parameters, and Spring AI automatically invokes the Java method. The tool's return value is fed back to the LLM, which formulates a natural language response. The tools are registered as ToolCallback[] beans in ToolConfiguration.
+
+Q63. What tools does the Agent Service expose?
+Answer: Six tools:
+
+BalanceTool — Fetches wallet balance (read-only, low-risk).
+TransferMoneyTool — Transfers money between wallets (high-risk, requires confirmation).
+TransactionHistoryTool — Retrieves recent transactions.
+SchedulePaymentTool — Schedules a future one-time payment.
+RecurringPaymentTool — Sets up recurring payments (e.g., monthly rent).
+ConditionalTriggerTool — Registers event-driven triggers (e.g., "When salary comes, send ₹5000 to Mom").
+Q64. How does the confirmation flow work for high-risk actions?
+Answer: The AgentService.processChat() checks isHighRiskAction(prompt) by scanning for keywords like "transfer", "send", "pay", "move money", "debit". If detected:
+
+It does NOT send the prompt to the LLM.
+It returns a ChatResponse with confirmationRequired=true and a formatted confirmation message asking the user to reply "Yes, confirm" or "No, cancel."
+It publishes a CONFIRMATION_PENDING audit event to Kafka.
+When the user confirms, the frontend calls processConfirmation(), which sends the original prompt to the LLM with full tool access.
+This prevents accidental financial operations from a casual message.
+
+Q65. How does the system prompt ensure security?
+Answer: The system prompt is dynamically constructed with the authenticated user's ID:
+
+
+AUTHENTICATED USER ID: {userId}
+CRITICAL RULES:
+1. Always use userId={userId} when calling tools.
+2. NEVER hallucinate or generate placeholder balances.
+3. If the user asks for their balance, YOU MUST EXECUTE the getBalance tool.
+4. If a tool returns an error, tell the user the error.
+5. Always use Indian Rupee (₹) for amounts.
+The userId comes from the validated JWT, not user input. This prevents prompt injection attacks where a user might say "My userId is 999" — the LLM is instructed to use the injected ID only.
+
+Q66. How does the Chat Memory work?
+Answer: RedisChatMemory implements Spring AI's ChatMemory interface. It stores conversation history in Redis with key chat:memory:<conversationId> and a 30-minute TTL. Messages are serialized as MessageDto objects (type + content). The add() method retrieves existing messages, appends new ones, and saves the full list. The get() method retrieves the last N messages. It handles deserialization quirks where Redis might return raw Map objects instead of MessageDto by checking instanceof and converting. The clear() method deletes the key.
+
+Q67. How does the TransferMoneyTool ensure idempotency?
+Answer: It generates a unique AI-REQ-<UUID> string as the idempotency key: String idempotencyKey = "AI-REQ-" + UUID.randomUUID(). This key is passed to the Transaction Service via the API Gateway. The Transaction Service checks idempotencyRepository.existsById(idempotencyKey) before processing. If a network retry causes the tool to be called twice with the same key, the second call is rejected as a duplicate. Each tool invocation generates a fresh key, ensuring one-tool-call = one-transfer.
+
+Q68. How does the BalanceTool work?
+Answer: BalanceTool.getBalance(BalanceRequest request) takes a record BalanceRequest(Long userId). It:
+
+Extracts the bearer token from the HTTP request.
+Calls walletClient.getWalletByUserId(userId, bearerToken) to get the wallet info.
+If no wallet found, returns a user-friendly error message.
+Calls walletClient.getBalance(walletId, bearerToken) to get the balance.
+Returns a formatted string: "Your current wallet balance is ₹{balance}. (Wallet ID: {id})".
+The LLM receives this string and incorporates it into its natural language response.
+
+Q69. How does the ConditionalTriggerTool resolve user names?
+Answer: When a user says "Send ₹5000 to Mom," the tool receives receiverNameOrId = "Mom". It calls userSearchClient.resolveUserByName("Mom", bearerToken) which searches the auth-service's user database by name. If no match is found, it fetches ALL users via getAllUsers() and returns a helpful error: "Could not find user 'Mom'. Available users: [Alice (ID: 2), Bob (ID: 3)]. Please check the name or provide a numeric user ID." This gives the LLM context to ask the user for clarification.
+
+Q70. How does the Agent Service audit AI actions?
+Answer: publishAuditEvent() publishes a Map<String, Object> to the ai-audit-logs Kafka topic containing: eventType, requestId, userId, prompt, result, and timestamp. This runs for every chat interaction — SUCCESS, FAILED, and CONFIRMATION_PENDING. The audit publishing is wrapped in a try-catch where failures are only logged as warnings — audit failure never affects the user's experience. A downstream consumer (future audit-service) would persist these for compliance.
+
+Q71. What LLM provider do you use and why?
+Answer: Groq Cloud with Llama 3.3 70B. Groq offers extremely fast inference (< 500ms for most responses) thanks to their custom LPU (Language Processing Unit) hardware. Llama 3.3 70B is an open-source model with strong function calling capabilities required for Spring AI tool invocation. I chose Groq over OpenAI for: (1) lower cost, (2) faster inference, (3) no vendor lock-in since Llama is open-source. The integration uses Spring AI's ChatClient abstraction, so switching providers requires only configuration changes.
+
+Q72. How does the SchedulePaymentTool work?
+Answer: It creates a ScheduledPayment entity with the sender wallet, receiver wallet, amount, and scheduled execution time. The AgentFeaturesScheduler in the Transaction Service runs as a @Scheduled cron job, polls for payments whose execution time has passed, and executes them as normal transfers through the transaction pipeline. This enables users to say "Send ₹1000 to Alice next Friday" through natural language.
+
+Q73. How does the RecurringPaymentTool work?
+Answer: It creates a RecurringPayment entity with sender/receiver wallets, amount, frequency (DAILY, WEEKLY, MONTHLY), and next execution date. The AgentFeaturesScheduler polls for recurring payments whose next execution date has passed, executes the transfer, and calculates the next execution date based on the frequency. This enables "Pay ₹5000 rent to landlord every month" via natural language.
+
+Q74. What is the AgentFeaturesClient?
+Answer: It's a WebClient-based HTTP client in the Agent Service that calls the Transaction Service's AgentFeaturesController endpoints. It provides methods like createScheduledPayment(), createRecurringPayment(), createConditionalTrigger(), getScheduledPayments(). All calls include the bearer token for authentication and route through the API Gateway.
+
+Q75. How do you handle LLM errors gracefully?
+Answer: In executeWithLLM(), the entire LLM call is wrapped in a try-catch. On exception:
+
+Execution time is still calculated.
+An audit event with "FAILED: " + errorMessage is published.
+A user-friendly ChatResponse is returned: "I encountered an error processing your request. Please try again." with status = "FAILED" and the error reason. This ensures the user never sees raw stack traces, and every failure is audited for debugging.
+📊 Section 6: Observability & Monitoring (Q76–Q85)
+Q76. What observability tools do you use?
+Answer: Three pillars:
+
+Metrics: Prometheus scrapes Spring Boot Actuator endpoints (/actuator/prometheus) from all services. Custom metrics include Kafka consumer counters.
+Tracing: Grafana Tempo collects distributed traces via OpenTelemetry (OTLP protocol on ports 4317/4318). Micrometer Tracing bridges Spring's instrumentation to OpenTelemetry.
+Visualization: Grafana dashboards display metrics from Prometheus and traces from Tempo, providing end-to-end request tracing and performance monitoring.
+Q77. How does distributed tracing work across your services?
+Answer: OpenTelemetry auto-instrumentation creates trace spans for each HTTP request and Kafka message. The X-Correlation-ID injected by the gateway is propagated through all services. Micrometer Tracing (1.2.5) bridges to OpenTelemetry (1.31.0), which exports spans to Grafana Tempo via OTLP. In Grafana, I can search by trace ID and see the complete request flow: Gateway → Auth/Wallet/Transaction → Kafka → Consumer, with timing for each span.
+
+Q78. What Prometheus metrics do you expose?
+Answer: Spring Boot Actuator auto-exposes: HTTP request latency/count (http_server_requests), JVM metrics (heap, GC, threads), Kafka consumer lag, Redis connection pool stats, HikariCP database connection pool metrics. Custom metrics: Kafka consumer success/failure/DLQ counters via KafkaMetricsService. These are scraped by Prometheus every 15s (configured in prometheus.yml).
+
+Q79. How do you alert on failures?
+Answer: Prometheus alert-rules.yml defines alerting rules. For example, if the DLQ counter increases or consumer failure rate exceeds a threshold, an alert fires. Grafana can be configured with alert channels (Slack, PagerDuty, email). The KafkaMetricsService.printMetrics() also logs current counters to stdout for real-time debugging.
+
+Q80. How does the Correlation ID help with debugging?
+Answer: When a user reports an issue, they can provide the X-Correlation-ID from the response header. I can then grep all service logs for that ID to trace the complete request lifecycle: which gateway filter processed it, which downstream service handled it, what Kafka events were produced, and where it failed. Without correlation IDs, debugging a request across 7 services would require timestamp-based log correlation, which is unreliable.
+
+Q81. What logging strategy do you use?
+Answer: SLF4J with Logback. Each log statement includes contextual information: [ServiceName] action: key=value format. For example: [AgentService] Processing chat: userId=1, requestId=AI-REQ-xxx, prompt='...'. The Agent Service uses @Slf4j (Lombok) for logger injection. Critical paths log at INFO level, errors at ERROR level, idempotency skips at WARN level. All logs include the correlation ID via MDC (Mapped Diagnostic Context).
+
+Q82. How do you monitor Kafka consumer health?
+Answer: Three approaches: (1) KafkaMetricsService tracks total/success/failure/DLQ counts exposed to Prometheus. (2) Spring Boot Actuator exposes Kafka consumer metrics (lag, fetch rate). (3) The DLQ consumer persists failed events with timestamps, enabling queries like "how many events failed in the last hour?" (4) Kafka's built-in consumer group offset lag tells me if consumers are falling behind.
+
+Q83. What is the Grafana Tempo configuration?
+Answer: Tempo runs on port 3200 (HTTP API) and ports 4317/4318 (OTLP gRPC and HTTP receivers). The configuration file (monitoring/tempo/tempo.yml) defines the receiver endpoints, storage backend (local filesystem at /tmp/tempo), and retention policies. Services send traces to Tempo via the OpenTelemetry auto-configuration in Spring Boot, which detects the Tempo endpoint from environment variables.
+
+Q84. How do you monitor Redis performance?
+Answer: Spring Boot Actuator exposes Lettuce (Redis client) metrics via Micrometer: connection pool active/idle counts, command latency histograms, and error rates. I also log every cache hit/miss in RedisBalanceService (REDIS GET → key = value). In production, I would add Redis INFO command monitoring for memory usage, hit rate, and eviction counts.
+
+Q85. What happens if Prometheus goes down?
+Answer: Metrics collection stops but no application is affected — Prometheus is a pull-based system that scrapes endpoints. Services continue running normally. When Prometheus recovers, it resumes scraping and there's a gap in the time-series data. To mitigate, I'd run Prometheus with persistent storage (prometheus-data volume) and consider Prometheus federation or Thanos for high availability.
+
+🐳 Section 7: DevOps, Docker & Kubernetes (Q86–Q95)
+Q86. How are your Dockerfiles structured?
+Answer: Each Java service uses a multi-stage-ish approach. The Dockerfile copies the pre-built JAR from the target/ directory into a eclipse-temurin:17-jdk base image, exposes the service port, and runs java -jar. For example, the auth-service Dockerfile copies auth-service/target/*.jar and exposes port 8093. The Python AI service uses a python:3.10-slim base, installs dependencies from requirements.txt, and runs uvicorn. The root .dockerignore excludes .git, node_modules, target, and IDE files.
+
+Q87. How do Docker Compose health checks work in your setup?
+Answer: Infrastructure services define health checks:
+
+MySQL: mysqladmin ping -h localhost with 10s interval, 5s timeout, 10 retries, 30s start period.
+Redis: redis-cli ping with 10s interval, 5 retries.
+Kafka: kafka-broker-api-versions --bootstrap-server localhost:9092 with 15s interval, 10 retries, 30s start period.
+Application services use depends_on with condition: service_healthy for infrastructure and condition: service_started for other services. This ensures MySQL is fully ready before auth-service starts, preventing connection failures.
+
+Q88. What Kubernetes resources do you define?
+Answer: The k8s/ directory contains deployment descriptors including service deployments, canary-rollout.yaml for canary deployments. Each deployment defines resource limits, readiness/liveness probes hitting the Actuator health endpoint, environment variables from ConfigMaps/Secrets, and replica counts. Services are exposed via Kubernetes Service resources with ClusterIP (internal) or LoadBalancer (external) types.
+
+Q89. What is the canary rollout strategy?
+Answer: The canary-rollout.yaml defines a gradual deployment strategy where a new version is deployed to a small percentage of pods first. Traffic is shifted progressively (e.g., 10% → 25% → 50% → 100%) based on success metrics. If error rates spike during canary, the rollout is automatically rolled back. This prevents bad deploys from affecting all users simultaneously.
+
+Q90. How do you manage database migrations in a microservices environment?
+Answer: Each service owns its own database schema (Database per Service pattern). Spring Boot's JPA with spring.jpa.hibernate.ddl-auto=update handles schema evolution during development. For production, I would use Flyway or Liquibase for versioned, repeatable migrations. The MySQL init scripts in mysql-init/ create the initial databases when the container first starts.
+
+Q91. How does your CI/CD pipeline work?
+Answer: The .github/ directory contains GitHub Actions workflows. The pipeline: (1) Checkout code, (2) Set up Java 17, (3) mvn clean install -DskipTests to build all modules, (4) Run unit tests, (5) Build Docker images, (6) Push to container registry, (7) Deploy to staging (Docker Compose on EC2) or production (Kubernetes). Each service can be built and deployed independently since they're separate Maven modules.
+
+Q92. How do you handle environment-specific configurations in Docker?
+Answer: Spring profiles: each service has application.yml (default) and application-docker.yml (Docker overrides). The Docker Compose sets SPRING_PROFILES_ACTIVE=docker. Docker-specific configs override hostnames (e.g., mysql instead of localhost, kafka:29092 instead of localhost:9092, redis instead of localhost). Sensitive values like DB_PASSWORD and JWT_SECRET are injected via environment variables with ${VAR:-default} syntax.
+
+Q93. How do you manage Docker volumes?
+Answer: Eight named volumes: mysql-data, redis-data, kafka-data, zookeeper-data, zookeeper-log, prometheus-data, grafana-data, tempo-data. All use the local driver. Named volumes survive docker compose down (without -v flag), preserving database state, Kafka offsets, and Grafana dashboards across restarts. docker compose down -v removes them for a clean slate.
+
+Q94. How does the AWS deployment differ from local?
+Answer: docker-compose.ec2.yml adjusts: (1) Kafka ADVERTISED_LISTENERS uses the EC2 public IP instead of localhost, (2) Service hostnames reference Docker network names, (3) Security groups open the required ports (8090, 8091-8095, 9100, 3000, 9090), (4) An Elastic IP is assigned for stable DNS, (5) The aws-setup.ps1 script automates EC2 provisioning, Docker installation, and stack deployment. Cost management scripts (aws-stop.ps1, aws-resume.ps1) start/stop the instance when not testing.
+
+Q95. How would you implement blue-green deployment for this system?
+Answer: I would: (1) Deploy the new version to a separate set of containers (green), (2) Run health checks and smoke tests against green, (3) Switch the load balancer (ALB) to point to green, (4) Keep blue running for quick rollback, (5) Drain blue after confidence period. Key consideration: Kafka consumers in both blue and green would need different consumer group IDs to avoid double-processing during the transition, or I'd stop blue consumers before starting green.
+
+🔮 Section 8: Advanced Topics & Tradeoffs (Q96–Q100)
+Q96. What are the key tradeoffs you made in this project?
+Answer:
+
+Eventual consistency over strong consistency: Money transfers are eventually consistent (Saga + Kafka). The sender sees "PENDING" immediately, not "SUCCESS." This trades user perception for system resilience.
+Orchestration over Choreography: More coupling to the Transaction Service but clearer failure handling.
+Redis cache over database-level caching: Faster reads but another infrastructure dependency and cache invalidation complexity.
+At-least-once over exactly-once: Kafka at-least-once delivery with application-level idempotency (Inbox pattern) is simpler than Kafka's exactly-once semantics (transactional producers/consumers).
+Synchronous fraud check over async: Adds ~50ms latency to debits but prevents fraudulent transactions from completing.
+Q97. If you had to redesign this system for 10x scale, what would you change?
+Answer:
+
+Replace MySQL with CockroachDB or YugabyteDB for horizontally scalable ACID transactions.
+Implement CQRS — separate read models (materialized views) from write models for wallet balances.
+Use Kafka Streams or Flink for real-time balance aggregation instead of write-through cache.
+Move to exactly-once Kafka semantics with idempotent producers and transactional consumers.
+Implement a dedicated Outbox publisher service (Debezium CDC) instead of polling.
+Add a service mesh (Istio) for mTLS, traffic management, and observability.
+Shard wallets across multiple database instances by wallet ID range.
+Q98. How would you handle a scenario where Kafka consumer lag grows indefinitely?
+Answer:
+
+Immediate: Scale consumer instances (add replicas). Kafka rebalances partitions automatically.
+Short-term: Increase partition count for high-throughput topics. Tune consumer max.poll.records and fetch.max.bytes.
+Root cause: Identify slow consumers — is the DB the bottleneck? Are locks causing contention? Is the fraud check timing out?
+Monitoring: Set up Prometheus alerts on consumer group lag. If lag exceeds threshold, auto-scale consumers via Kubernetes HPA.
+Last resort: If messages are too old to be relevant, consider resetting consumer offsets (with extreme caution in a financial system).
+Q99. What would you do differently if you started this project from scratch?
+Answer:
+
+Use Debezium + CDC instead of polling-based outbox publisher — change data capture is more efficient and doesn't require SKIP LOCKED.
+Implement gRPC for inter-service communication instead of REST — better performance, schema enforcement via protobuf.
+Use Testcontainers from day one for integration tests with real MySQL, Redis, and Kafka.
+Implement API versioning (URL path or header-based) from the start.
+Use Helm charts instead of raw Kubernetes YAMLs for templated deployments.
+Add circuit breakers on all synchronous inter-service calls, not just auth.
+Implement event schema registry (Confluent Schema Registry) for Kafka event evolution.
+Q100. Walk me through a complete user journey from registration to first transfer.
+Answer:
+
+Registration: User submits name, email, password, mobile → API Gateway → Auth Service. Password is BCrypt-hashed, user is saved with verified=false. A UserRegisteredEvent is published to Kafka. A NotificationEvent with OTP is published.
+Wallet Creation: The UserRegisteredConsumer in Wallet Service receives the event and creates a wallet with zero balance.
+OTP Delivery: Notification Service receives the event, sends SMS via Twilio and email via SMTP.
+OTP Verification: User submits OTP → Auth Service verifies against DB (expiry + one-time use) → marks user as verified.
+Login: User submits email + password → Auth Service validates → returns JWT token with userId claim.
+Deposit: User deposits money via wallet endpoint → balance updated in DB + Redis cache + ledger entry created.
+Transfer: User initiates transfer → API Gateway validates JWT → Transaction Service checks idempotency → checks Redis-cached balance → creates Transaction (PENDING) + TransferSaga (INITIATED) → writes to Outbox.
+Outbox Publisher: Picks up event → publishes to Kafka transaction-created.
+Wallet Service Debit: Consumes event → Inbox check → acquires Redis lock → debits sender → publishes TransactionProcessedEvent (SUCCESS).
+Saga Completion: Transaction Service consumes event → updates saga to COMPLETED → writes WalletCreditEvent to outbox → credits receiver wallet.
+Notification: Transaction Service publishes NotificationEvent → Notification Service sends "Money Received!" SMS/email to receiver.
+The entire flow takes ~2-5 seconds end-to-end, with the user seeing "PENDING" immediately after step 7.
+
+💡 Tip: When answering these in an interview, always tie your answers back to why you made a particular decision, what tradeoffs you considered, and what you would do differently at scale. Interviewers value engineering judgment over implementation details.

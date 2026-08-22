@@ -10,6 +10,7 @@ COPY wallet-service/ ./wallet-service/
 COPY transaction-service/ ./transaction-service/
 COPY api-gateway/ ./api-gateway/
 COPY notification-service/ ./notification-service/
+COPY agent-service/ ./agent-service/
 
 # Install common-events first
 RUN mvn install -pl common-events -am -DskipTests

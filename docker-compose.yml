@@ -60,8 +60,10 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     volumes:
       - kafka-data:/var/lib/kafka/data
@@ -141,6 +143,8 @@ services:
       - "8093:8093"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: root
+      DB_PASSWORD: rootroot1234
     depends_on:
       mysql:
         condition: service_healthy
@@ -157,6 +161,8 @@ services:
       - "8091:8091"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: root
+      DB_PASSWORD: rootroot1234
     depends_on:
       mysql:
         condition: service_healthy
@@ -175,6 +181,8 @@ services:
       - "8092:8092"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: root
+      DB_PASSWORD: rootroot1234
     depends_on:
       mysql:
         condition: service_healthy
@@ -195,6 +203,8 @@ services:
       - "8094:8094"
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      DB_USERNAME: root
+      DB_PASSWORD: rootroot1234
     depends_on:
       mysql:
         condition: service_healthy
@@ -214,13 +224,37 @@ services:
       ENVIRONMENT: docker
       ENABLE_KAFKA: "false"
       ENABLE_REDIS: "false"
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       APP_PORT: "8095"
     depends_on:
       - redis
       - kafka
+    restart: on-failure
+
+  agent-service:
+    build:
+      context: .
+      dockerfile: agent-service/Dockerfile
+    container_name: agent-service
+    ports:
+      - "9100:9100"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      GATEWAY_URL: http://api-gateway:8090
+      REDIS_HOST: redis
+      KAFKA_BROKERS: kafka:29092
+      GEMINI_PROJECT_ID: ${GEMINI_PROJECT_ID:-demo-project}
+      GEMINI_LOCATION: ${GEMINI_LOCATION:-us-central1}
+      JWT_SECRET: ${JWT_SECRET:-verysecretkeyverysecretkeyverysecretkeyverysecretkey}
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      api-gateway:
+        condition: service_started
     restart: on-failure
 
   consumer-wallet:

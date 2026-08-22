@@ -1,0 +1,434 @@
+Redis Distributed Lock — Deep Analysis of YOUR Project
+Based on complete code inspection of your actual codebase. No generic explanations. No invented scenarios.
+
+1. Exact Redis Locking Implementation
+Service: wallet-service
+File: 
+RedisLockService.java
+Property	Value from Code
+Redis key format	lock:wallet:{walletId} (e.g. lock:wallet:5)
+Resource being locked	A specific wallet ID
+Lock mechanism	RedisTemplate.opsForValue().setIfAbsent() → This is Redis SET key value NX EX
+Lock value	UUID.randomUUID().toString() (unique per acquisition)
+TTL	10 seconds
+When lock fails	Returns null → caller throws "Wallet is busy. Try again."
+Retry/wait logic	❌ NONE — single attempt, immediate fail
+Release mechanism	Lua script: compare-and-delete (only deletes if value matches)
+Acquire Lock (Line 21-41):
+java
+
+public String acquireLock(Long walletId) {
+    String key = LOCK_PREFIX + walletId;           // "lock:wallet:5"
+    String lockValue = UUID.randomUUID().toString(); // unique owner ID
+    
+    Boolean success = redisTemplate.opsForValue().setIfAbsent(
+            key, lockValue, 10, TimeUnit.SECONDS   // SET NX EX 10
+    );
+    
+    if (Boolean.TRUE.equals(success)) return lockValue;
+    return null;  // LOCK FAILED — no retry
+}
+Release Lock (Line 43-65):
+java
+
+public void releaseLock(Long walletId, String lockValue) {
+    String luaScript =
+        "if redis.call('get', KEYS[1]) == ARGV[1] then " +
+            "return redis.call('del', KEYS[1]) " +
+        "else return 0 end";
+    // Atomic compare-and-delete via Lua → prevents releasing someone else's lock
+}
+Where It Is Called: 
+WalletService.java
+ — debit() method only (Line 137-173)
+java
+
+@Transactional
+public void debit(Long walletId, BigDecimal amount) {
+    rateLimitService.checkRateLimit(walletId);
+    fraudDetectionService.checkFraud(walletId);
+    
+    String lockValue = redisLockService.acquireLock(walletId);  // ← LOCK
+    if (lockValue == null) {
+        throw new RuntimeException("Wallet is busy. Try again.");
+    }
+    try {
+        WalletEntity wallet = walletRepository.findById(walletId)...;
+        if (wallet.getBalance().compareTo(amount) < 0)
+            throw new RuntimeException("Insufficient balance");
+        
+        wallet.setBalance(wallet.getBalance().subtract(amount));
+        walletRepository.save(wallet);
+    } finally {
+        redisLockService.releaseLock(walletId, lockValue);       // ← UNLOCK
+    }
+}
+IMPORTANT
+
+The lock is used ONLY in debit(). The credit(), deposit(), and compensate() methods have NO Redis lock.
+
+2. Exact Resource Being Protected
+Question	Answer from Code
+What is locked?	A specific wallet's balance during DEBIT
+Lock key example	lock:wallet:5 locks wallet ID 5
+What operation?	Read balance → check sufficiency → subtract → save
+Why this specific operation?	Debit has a check-then-act pattern: read balance, verify >= amount, then subtract. This is a classic race condition pattern.
+What the lock protects against:
+The lock serializes access to the read → check → write sequence on a specific wallet's balance during debit operations. Without it, two concurrent debits could both read the same balance value before either writes.
+
+3. The REAL Concurrency Problem in YOUR Project
+Your Architecture Creates This Scenario Naturally
+Let me trace YOUR actual code flow:
+
+
+User clicks "Send ₹800 to Arun"
+        │
+        ▼
+TransactionController.transfer()          ← transaction-service
+        │
+        ├── Idempotency check
+        ├── Save Transaction (status=PENDING)
+        ├── Save TransferSaga (status=INITIATED)
+        ├── Save OutboxEvent (topic="transaction-created")
+        │
+        ▼
+OutboxPublisher (every 500ms)             ← transaction-service
+        │
+        ├── Reads outbox, publishes to Kafka topic "transaction-created"
+        │
+        ▼
+TransactionConsumer.consume()              ← wallet-service
+        │
+        ├── Inbox check (ProcessedEvent)
+        ├── walletService.processTransaction()
+        │       ├── walletService.debit()    ← ⭐ REDIS LOCK HERE
+        │       └── kafkaTemplate.send("transaction-processed")
+        │
+        ▼
+TransactionProcessedConsumer.consume()     ← transaction-service
+        │
+        ├── If SUCCESS → save OutboxEvent (topic="wallet-credit")
+        │       → WalletCreditConsumer → walletService.credit()  ← ❌ NO LOCK
+        │
+        ├── If FAILED → save OutboxEvent (topic="wallet-compensation-requested")
+                → CompensationConsumer → walletService.compensate()  ← ❌ NO LOCK
+How Two Operations Can Overlap on the SAME Wallet
+Here are scenarios that actually exist in your code:
+
+Scenario A: Two Kafka Events for the Same Wallet (MOST REALISTIC)
+Your TransactionConsumer listens on topic transaction-created with groupId = "wallet-group".
+
+Manikam (wallet 5) has ₹1000 and sends two transfers:
+
+Transfer 1: ₹600 to Arun (Transaction ID 101)
+Transfer 2: ₹500 to Vijay (Transaction ID 102)
+These are two different transactions with two different idempotency keys. Idempotency won't block either.
+
+Both get saved to the outbox. The OutboxPublisher publishes both to Kafka topic transaction-created. These events land on different partitions (because your code uses aggregateId = senderWalletId but Kafka hashes partition assignment).
+
+With 2 wallet-service pods (your K8s config: replicas: 2) each pod gets one event:
+
+
+Kafka topic: transaction-created
+Partition 0 → wallet-service Pod A → TransactionConsumer → debit(walletId=5, ₹600)
+Partition 1 → wallet-service Pod B → TransactionConsumer → debit(walletId=5, ₹500)
+IMPORTANT
+
+Wait — your code uses senderWalletId as the partition key!
+
+In 
+TransactionService.java line 149
+: aggregateId = senderWalletId.toString(). This means both events for wallet 5 should go to the same partition.
+
+If they go to the same partition, only one consumer instance reads that partition, so they would be processed sequentially within that single consumer, and the lock adds minimal value for THIS specific path.
+
+HOWEVER, this only guarantees ordering if:
+
+The Kafka topic has proper partitioning (code does NOT show partition count config)
+No consumer rebalancing happens between the two events
+The consumer group has exactly as many consumers as partitions
+Scenario B: Kafka Debit + REST API Debit at the Same Time (ACTUALLY POSSIBLE)
+Your 
+WalletController
+ exposes a direct REST endpoint for debit:
+
+java
+
+@PostMapping("/debit")
+public ResponseEntity<String> debit(@RequestBody DepositRequest request) {
+    walletService.debit(request.getWalletId(), ...);
+}
+This means the debit() method can be called from two different paths simultaneously:
+
+
+Path 1: Kafka → TransactionConsumer → walletService.debit(walletId=5)
+Path 2: REST  → WalletController    → walletService.debit(walletId=5)
+These are handled by different threads (even on the same JVM instance). The Kafka consumer thread and the HTTP request thread can both hit debit() at the same time on the same wallet.
+
+Scenario C: Debit + Credit on Same Wallet (POSSIBLE, BUT NO LOCK ON CREDIT)
+
+Thread 1: TransactionConsumer → debit(walletId=5, ₹600)    ← HAS LOCK
+Thread 2: WalletCreditConsumer → credit(walletId=5, ₹300)  ← NO LOCK
+Both modify wallet.setBalance(...) and call walletRepository.save(wallet). The credit does NOT acquire the Redis lock, so the lock doesn't protect this case.
+
+Scenario D: SagaTimeoutScheduler Retry (ACTUALLY POSSIBLE)
+Your 
+SagaTimeoutScheduler
+ runs every 60 seconds and retries stuck sagas by publishing new events to wallet-credit or wallet-compensation-requested. If a saga is stuck but the original event is still being processed (slow), the retry can fire while the original is still running.
+
+4. Is Redis Lock Actually Necessary? Comparison with Alternatives
+Your WalletEntity Already Has @Version (Optimistic Locking!)
+java
+
+// WalletEntity.java line 25-26
+@Version
+private Long version;
+This is JPA Optimistic Locking. When two threads try to save the same wallet simultaneously, the second one gets OptimisticLockException because the version number has changed.
+
+Comparison Table
+Mechanism	What It Solves	Present in Your Code?	Does It Overlap with Redis Lock?
+@Version (Optimistic Lock)	Prevents lost updates on same DB row	✅ YES — WalletEntity has it	✅ YES — this already prevents the race condition
+@Transactional	Ensures atomicity of read+write within one DB transaction	✅ YES — on debit()	Partially overlaps
+Idempotency Key	Blocks duplicate HTTP requests	✅ YES — TransactionService.transfer()	❌ Different problem
+Inbox Pattern (ProcessedEvent)	Blocks duplicate Kafka events	✅ YES — TransactionConsumer	❌ Different problem
+Outbox Pattern	Ensures reliable event publishing	✅ YES — OutboxPublisher	❌ Different problem
+Saga + Compensation	Coordinates distributed transactions	✅ YES — TransferSaga	❌ Different problem
+Redis Lock	Prevents concurrent debit on same wallet	✅ YES — RedisLockService	✅ Overlaps with @Version
+Pessimistic Lock (SELECT FOR UPDATE)	DB-level row lock	❌ NOT used	Would replace Redis lock
+Atomic SQL UPDATE	UPDATE wallets SET balance = balance - ?  WHERE id = ? AND balance >= ?	❌ NOT used	Would replace both Redis lock AND @Version
+The Critical Finding
+WARNING
+
+Your @Version annotation on WalletEntity ALREADY protects against the race condition that the Redis lock is trying to prevent.
+
+If two threads read wallet balance = ₹1000 and both try to save:
+
+Thread A saves with version=1 → succeeds, version becomes 2
+Thread B tries to save with version=1 → throws OptimisticLockException → transaction rolls back
+The data is NEVER corrupted. The second debit simply fails.
+
+What Redis Lock Adds ON TOP of @Version
+Without Redis Lock (only @Version)	With Redis Lock
+Both threads read from DB, do work	Second thread fails immediately ("Wallet is busy")
+Second thread fails at save time (wasted work)	Second thread doesn't even start work
+Exception type: OptimisticLockException	Exception type: RuntimeException("Wallet is busy")
+User sees generic error	User sees clear "busy" message
+Failed thread already created LedgerEntry that must be rolled back	No wasted DB writes
+Verdict: Redis Lock is a performance optimization and better UX layer on top of @Version. It fails-fast instead of doing wasted work. But @Version is the actual safety net that prevents data corruption.
+
+5. Concept Separation in YOUR Project
+Concept	Mechanism in Your Code	What It Prevents	Example
+Duplicate HTTP request	idempotencyRepository.existsById(key) in 
+TransactionService.transfer()
+User/gateway sends same transfer request twice	Same idempotency-key header → second request rejected
+Duplicate Kafka event	processedRepo.existsById(txnId) in 
+TransactionConsumer.consume()
+Kafka delivers same event twice (at-least-once)	Same transactionId → "Duplicate event ignored (Inbox)"
+Concurrent modification	@Version on 
+WalletEntity
+Two threads save stale data	OptimisticLockException on version mismatch
+Distributed lock	RedisLockService.acquireLock() in 
+WalletService.debit()
+Two threads even starting work on same wallet	"Wallet is busy. Try again."
+Database atomicity	@Transactional on 
+debit()
+Partial writes (debit saved, ledger not)	All-or-nothing commit
+Saga	
+TransferSaga
+ + 
+SagaTimeoutScheduler
+Cross-service transaction left incomplete	Debit succeeded but credit didn't → compensate
+How They Layer Together (Defense in Depth)
+
+Request comes in
+    │
+    ├── Layer 1: Idempotency         → "Is this a duplicate request?"
+    ├── Layer 2: Inbox/ProcessedEvent → "Is this a duplicate Kafka event?"
+    ├── Layer 3: Redis Lock           → "Is another thread working on this wallet RIGHT NOW?"
+    ├── Layer 4: @Transactional       → "If anything fails mid-way, roll back everything"
+    ├── Layer 5: @Version             → "If someone else modified this row, fail safely"
+    └── Layer 6: Saga + Compensation  → "If cross-service flow breaks, auto-recover"
+Each layer catches a DIFFERENT failure mode. They are NOT redundant with each other (except Layer 3 and Layer 5 which partially overlap for the debit case).
+
+6. Is Redis Lock Essential, Redundant, or Unnecessary?
+Answer: B + D — Useful but partially redundant with @Version, becomes MORE valuable after horizontal scaling
+Reasoning:
+
+@Version already prevents data corruption — even without the Redis lock, your balance can never go negative due to a race condition because OptimisticLockException would roll back the second writer.
+
+Redis Lock adds value as a "fail-fast" mechanism — instead of reading from DB, creating a LedgerEntry, doing the subtraction, and THEN failing at save time, the lock rejects the second request immediately with zero wasted work.
+
+Redis Lock becomes MORE important with multiple pods — With replicas: 2 (your K8s config) and an HPA that scales up to maxReplicas: 10, multiple wallet-service instances can receive concurrent debit requests for the same wallet. @Version still protects correctness, but the Redis lock prevents wasted work across all 10 pods.
+
+Redis Lock does NOT protect credit() or deposit() — The code does not establish that credit and deposit are protected by the lock. This is a gap. If a debit and a credit happen simultaneously on the same wallet, the Redis lock on debit does NOT block the credit, and if both read version=1, one will fail with OptimisticLockException.
+
+CAUTION
+
+Gap in current implementation: credit() and compensate() modify the wallet balance without acquiring the Redis lock. This means a concurrent debit + credit can still race. The @Version catches this, but the Redis lock doesn't help here.
+
+7. Real Scenario from YOUR Codebase
+Full Flow: Manikam (Wallet 5, Balance ₹1000) Sends ₹800 to Arun (Wallet 8)
+
+STEP 1: Frontend → POST /transactions/transfer
+        Headers: idempotency-key: "abc-123", loggedInUserId: "1"
+        Body: { senderWalletId: 5, receiverWalletId: 8, amount: 800 }
+        │
+        ▼
+STEP 2: TransactionController.transfer() → TransactionService.transfer()
+        ├── idempotencyRepository.existsById("abc-123") → false ✅
+        ├── Redis cache check: wallet:balance::5 → ₹1000 ≥ ₹800 ✅
+        ├── DB save: Transaction(id=101, status=PENDING)
+        ├── DB save: TransferSaga(transactionId=101, status=INITIATED)
+        ├── DB save: OutboxEvent(topic="transaction-created", payload={...})
+        ├── DB save: IdempotencyRecord("abc-123")
+        └── Returns "Transfer successful" to frontend
+        │
+        ▼
+STEP 3: OutboxPublisher (@Scheduled every 500ms)
+        ├── Reads OutboxEvent from DB
+        ├── Kafka send: topic="transaction-created", key="5", value=TransactionCreatedEvent
+        └── Marks OutboxEvent as published=true
+        │
+        ▼
+STEP 4: TransactionConsumer.consume() [wallet-service]
+        ├── processedRepo.existsById("101") → false ✅ (Inbox check)
+        ├── walletService.processTransaction(101, 5, ₹800)
+        │       │
+        │       ▼
+        │   walletService.debit(walletId=5, amount=₹800)
+        │       ├── rateLimitService.checkRateLimit(5)
+        │       │       └── Redis: INCREMENT ratelimit:wallet:5 → count=1 ✅
+        │       ├── fraudDetectionService.checkFraud(5)
+        │       │       └── Redis: INCREMENT fraud:wallet:5 → count=1 ✅
+        │       ├── ⭐ Redis: SET lock:wallet:5 <uuid> NX EX 10 → true ✅
+        │       ├── DB read: WalletEntity(id=5, balance=1000, version=1)
+        │       ├── ₹1000 ≥ ₹800 → yes ✅
+        │       ├── DB save: LedgerEntry(walletId=5, amount=-800, type=DEBIT)
+        │       ├── DB save: WalletEntity(id=5, balance=200, version=2)
+        │       ├── Redis: SET wallet:balance::5 → ₹200 (cache update)
+        │       └── ⭐ Redis: Lua DEL lock:wallet:5 (if uuid matches) → released
+        │       │
+        │       ▼
+        │   kafkaTemplate.send("transaction-processed", "101", {status:SUCCESS})
+        │
+        ├── processedRepo.save(ProcessedEvent("101")) → Inbox saved
+        │
+        ▼
+STEP 5: TransactionProcessedConsumer.consume() [transaction-service]
+        ├── status = SUCCESS
+        ├── saga.status = COMPLETED
+        ├── tx.status = SUCCESS
+        ├── DB save: OutboxEvent(topic="wallet-credit", aggregateId="8", payload=WalletCreditEvent)
+        │
+        ▼
+STEP 6: OutboxPublisher → Kafka send: topic="wallet-credit"
+        │
+        ▼
+STEP 7: WalletCreditConsumer.consume() [wallet-service]
+        ├── walletService.credit(101, walletId=8, ₹800)
+        │       ├── Idempotency: idempotencyRepository.existsById("CREDIT_101") → false ✅
+        │       ├── DB save: LedgerEntry(walletId=8, amount=800, type=CREDIT)
+        │       ├── DB save: WalletEntity(id=8, balance=800+old, version++)
+        │       ├── Redis: wallet:balance::8 updated
+        │       └── ❌ NO REDIS LOCK USED
+Where Redis Lock Actually Fires in This Flow
+Only at STEP 4, inside debit(). If a second debit request for wallet 5 arrives while STEP 4 is executing:
+
+
+Second request → redisLockService.acquireLock(5)
+              → SET lock:wallet:5 <uuid2> NX EX 10
+              → false (key already exists)
+              → returns null
+              → throws "Wallet is busy. Try again."
+              → ❌ Rejected immediately. No DB work wasted.
+8. Horizontal Scaling Analysis
+Your K8s Configuration
+Config	Value	Source
+wallet-service replicas	2	
+wallet-service.yaml line 63
+wallet-service HPA min	2	
+backend-hpa.yaml line 31
+wallet-service HPA max	10	
+backend-hpa.yaml line 32
+transaction-service replicas	2	
+transaction-service.yaml line 7
+With 2+ Wallet-Service Pods
+
+┌──────────────────┐
+                    │   Kafka Topic    │
+                    │ transaction-     │
+                    │   created        │
+                    │                  │
+                    │  Partition 0     │──→ wallet-service Pod A
+                    │  Partition 1     │──→ wallet-service Pod B
+                    └──────────────────┘
+Pod A: JVM Lock (synchronized) only protects threads WITHIN Pod A
+Pod B: JVM Lock (synchronized) only protects threads WITHIN Pod B
+Redis Lock: Protects across BOTH pods via shared Redis instance
+Why synchronized / JVM lock would NOT work:
+
+Pod A and Pod B are separate JVM processes on separate containers
+They share the same MySQL database and Redis instance
+A synchronized block in Pod A does NOT block Pod B
+Only an external coordination system (Redis, ZooKeeper, DB lock) can synchronize across pods
+Your architecture IS designed for multiple instances — this is confirmed by K8s replicas: 2 and HPA up to 10. The Redis lock is architecturally appropriate for this setup.
+
+BUT — Does the Kafka Partitioning Already Prevent This?
+Your code uses senderWalletId as the Kafka partition key:
+
+java
+
+// TransactionService.java line 149
+.aggregateId(senderWalletId.toString()) // partition key
+If all events for wallet 5 go to the same partition, and one consumer reads that partition, they are processed sequentially. This means the Kafka partitioning strategy already provides ordering for the Kafka path.
+
+However, the Redis lock still protects against:
+
+REST API POST /wallet/debit being called while a Kafka event is being processed
+Consumer group rebalancing temporarily assigning the same partition to two consumers
+Any code path that calls debit() outside of Kafka (e.g., direct REST, tests, agent-service)
+9. Interview Preparation
+1. One-Paragraph Explanation
+In my distributed wallet microservice, the debit() method in wallet-service follows a read-check-write pattern: it reads the wallet balance, checks if sufficient funds exist, and then subtracts the amount. Since my wallet-service runs multiple Kubernetes pods (2 minimum, up to 10 via HPA), two concurrent debit requests for the same wallet — arriving via Kafka events or direct REST calls — could read the same balance before either writes, causing a double-spend. I use a Redis distributed lock with SET NX EX on the key lock:wallet:{walletId} to ensure only one debit operation runs on a given wallet at a time across all pods. The lock uses a UUID owner value and a Lua compare-and-delete script for safe release, with a 10-second TTL as a safety net. This works alongside JPA's @Version optimistic locking as defense-in-depth: the Redis lock is a fail-fast layer that rejects concurrent requests immediately, while @Version is the safety net that prevents data corruption if the lock ever fails.
+
+2. 30-Second Interview Answer
+"My wallet-service runs 2–10 pods in Kubernetes. The debit method reads the balance, checks sufficiency, and subtracts — a classic check-then-act race condition. I use a Redis distributed lock with SET NX EX on the key lock:wallet:{walletId} so that only one debit runs per wallet across all pods. If the lock is taken, the request immediately fails with 'wallet is busy' — no wasted database work. I also have @Version optimistic locking on the entity as a safety net, so even if the Redis lock fails, the database prevents data corruption. The lock uses a UUID value and a Lua script for safe release, with a 10-second TTL."
+
+3. 2-Minute Deep Explanation
+"Let me walk you through the full flow. When a user transfers money, the transaction-service saves the transaction with status PENDING and writes an outbox event. An outbox publisher polls every 500ms and publishes to the Kafka topic transaction-created. The wallet-service consumes this event, and its TransactionConsumer first does an inbox check — has this event already been processed? If not, it calls walletService.processTransaction(), which calls debit().
+
+Inside debit(), before touching the database, I acquire a Redis distributed lock using SET lock:wallet:{walletId} {uuid} NX EX 10. This is the standard Redis locking pattern — NX means only set if the key doesn't exist, EX 10 gives it a 10-second TTL so the lock auto-expires if the pod crashes. I store a UUID as the lock value so that only the owner can release it — the release uses a Lua script that atomically checks the value and deletes the key.
+
+If the lock is already held, the method immediately throws 'Wallet is busy' — this is a fail-fast pattern. No database reads, no ledger entries, no wasted work.
+
+Once the lock is acquired, I read the wallet, check the balance, create a ledger entry, update the balance, and save. After that, I release the lock in a finally block.
+
+Why not just use a database lock? Because my wallet-service runs 2 to 10 pods via Kubernetes HPA. A synchronized block only works within one JVM. A SELECT FOR UPDATE would work but holds a database connection open for the entire lock duration — Redis is more lightweight and doesn't tie up DB connections.
+
+I also have defense-in-depth: the WalletEntity has a @Version field for JPA optimistic locking. Even if two requests somehow both acquire the lock (Redis isn't perfectly CP under network partitions), the second save would throw OptimisticLockException because the version number changed. So Redis lock is the fast path for rejecting concurrent requests, and @Version is the safety net for data integrity."
+
+4. Hardest Follow-Up Question
+"I see you only lock debit() but not credit() or deposit(). If a debit and a credit happen simultaneously on the same wallet, the Redis lock doesn't help. How do you handle that?"
+
+5. Answer to the Hard Follow-Up
+"That's a valid observation. The Redis lock currently only protects debit-vs-debit concurrency. For debit-vs-credit, I rely on JPA's @Version optimistic locking — if both operations read version=1 and try to save, the second one gets OptimisticLockException and the transaction rolls back. The Kafka consumer would retry the event, which would then succeed with the correct version.
+
+However, in a production system, I would extend the Redis lock to also cover credit operations — or better yet, use a single atomic SQL statement like UPDATE wallets SET balance = balance - :amount WHERE id = :id AND balance >= :amount which eliminates the read-check-write pattern entirely and makes the lock unnecessary for the core balance update. The Redis lock would still be useful for coordinating the broader operation — ledger entries, cache updates, and event publishing."
+
+6. Scenario You Should NEVER Use in an Interview
+CAUTION
+
+NEVER say: "The lock prevents two users from simultaneously clicking 'Pay' on two different devices."
+
+Why it's weak: An interviewer will immediately challenge this. A real user doesn't open two devices and click pay at the exact same millisecond. This scenario sounds invented and shows you don't understand your own architecture.
+
+Instead say: "The lock prevents concurrent debit requests that arrive via different code paths — for example, a Kafka event being processed while a direct REST API call hits the same wallet, or during Kafka consumer group rebalancing when the same partition might temporarily be consumed by two pods."
+
+Summary Verdict
+Question	Answer
+Is the Redis lock implemented correctly?	✅ Yes — SET NX EX + UUID + Lua release is the standard pattern
+Is it architecturally appropriate?	✅ Yes — multi-pod deployment needs cross-JVM coordination
+Is it strictly necessary for data safety?	⚠️ No — @Version already prevents data corruption
+What value does it add?	Fail-fast rejection, no wasted DB work, better UX error message
+What's missing?	credit() and deposit() are not locked — gap in consistency
+Overall assessment	B + D: Useful optimization, partially redundant with @Version, becomes more valuable at scale

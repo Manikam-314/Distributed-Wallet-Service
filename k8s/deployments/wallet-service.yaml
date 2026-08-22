@@ -1,3 +1,59 @@
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: wallet-service
+#   namespace: distributed-wallet
+# spec:
+#   replicas: 2
+#   selector:
+#     matchLabels:
+#       app: wallet-service
+#   template:
+#     metadata:
+#       labels:
+#         app: wallet-service
+#     spec:
+#       containers:
+#       - name: wallet-service
+#         image: distributed-wallet/wallet-service:latest
+#         ports:
+#         - containerPort: 8082
+#         envFrom:
+#         - configMapRef:
+#             name: wallet-config
+#         env:
+#         - name: MYSQL_PASSWORD
+#           valueFrom:
+#             secretKeyRef:
+#               name: wallet-secrets
+#               key: MYSQL_ROOT_PASSWORD
+#         resources:
+#           limits:
+#             cpu: "500m"
+#             memory: "512Mi"
+#           requests:
+#             cpu: "200m"
+#             memory: "256Mi"
+#         readinessProbe:
+#           httpGet:
+#             path: /actuator/health/readiness
+#             port: 8082
+#           initialDelaySeconds: 20
+#           periodSeconds: 10
+# ---
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: wallet-service
+#   namespace: distributed-wallet
+# spec:
+#   selector:
+#     app: wallet-service
+#   ports:
+#   - protocol: TCP
+#     port: 8082
+#     targetPort: 8082
+#   type: ClusterIP
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,16 +73,21 @@ spec:
       - name: wallet-service
         image: distributed-wallet/wallet-service:latest
         ports:
-        - containerPort: 8082
+        - containerPort: 8091
         envFrom:
         - configMapRef:
             name: wallet-config
         env:
-        - name: MYSQL_PASSWORD
+        - name: DB_USERNAME
           valueFrom:
             secretKeyRef:
               name: wallet-secrets
-              key: MYSQL_ROOT_PASSWORD
+              key: DB_USERNAME
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: wallet-secrets
+              key: DB_PASSWORD
         resources:
           limits:
             cpu: "500m"
@@ -36,10 +97,16 @@ spec:
             memory: "256Mi"
         readinessProbe:
           httpGet:
-            path: /actuator/health/readiness
-            port: 8082
-          initialDelaySeconds: 20
+            path: /actuator/health
+            port: 8091
+          initialDelaySeconds: 25
           periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8091
+          initialDelaySeconds: 40
+          periodSeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -51,6 +118,6 @@ spec:
     app: wallet-service
   ports:
   - protocol: TCP
-    port: 8082
-    targetPort: 8082
+    port: 8091
+    targetPort: 8091
   type: ClusterIP

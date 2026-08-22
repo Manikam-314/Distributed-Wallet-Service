@@ -9,11 +9,16 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 
+import org.springframework.beans.factory.annotation.Value;
+
 import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
 public class KafkaConsumerConfig {
+
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String bootstrapServers;
 
     @Bean
     public ConsumerFactory<String, TransactionProcessedEvent> consumerFactory() {
@@ -24,7 +29,7 @@ public class KafkaConsumerConfig {
         deserializer.addTrustedPackages("*");
 
         Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(ConsumerConfig.GROUP_ID_CONFIG, "transaction-group");
 
         return new DefaultKafkaConsumerFactory<>(
@@ -36,6 +41,7 @@ public class KafkaConsumerConfig {
 
     // ⭐ THIS WAS MISSING
     @Bean
+    @SuppressWarnings("null")
     public ConcurrentKafkaListenerContainerFactory<String, TransactionProcessedEvent>
     kafkaListenerContainerFactory() {
 

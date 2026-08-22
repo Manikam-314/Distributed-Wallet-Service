@@ -17,23 +17,29 @@ spec:
       - name: api-gateway
         image: distributed-wallet/api-gateway:latest
         ports:
-        - containerPort: 8080
+        - containerPort: 8090
         envFrom:
         - configMapRef:
             name: wallet-config
         resources:
           limits:
-            cpu: "500m"
+            cpu: "400m"
             memory: "512Mi"
           requests:
             cpu: "200m"
             memory: "256Mi"
         readinessProbe:
           httpGet:
-            path: /actuator/health/readiness
-            port: 8080
-          initialDelaySeconds: 20
+            path: /actuator/health
+            port: 8090
+          initialDelaySeconds: 25
           periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8090
+          initialDelaySeconds: 40
+          periodSeconds: 15
 ---
 apiVersion: v1
 kind: Service
@@ -45,6 +51,6 @@ spec:
     app: api-gateway
   ports:
   - protocol: TCP
-    port: 8080
-    targetPort: 8080
+    port: 8090
+    targetPort: 8090
   type: LoadBalancer

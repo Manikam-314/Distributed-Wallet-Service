@@ -12,11 +12,16 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.util.backoff.FixedBackOff;
 
+import org.springframework.beans.factory.annotation.Value;
+
 import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
 public class  KafkaConsumerConfig {
+
+    @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
+    private String bootstrapServers;
 
     // ⭐ CONSUMER FACTORY
     @Bean
@@ -28,7 +33,7 @@ public class  KafkaConsumerConfig {
         deserializer.addTrustedPackages("*");
 
         Map<String, Object> config = new HashMap<>();
-        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+        config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(ConsumerConfig.GROUP_ID_CONFIG, "wallet-group");
 
         return new DefaultKafkaConsumerFactory<>(

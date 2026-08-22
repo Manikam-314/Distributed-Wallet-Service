@@ -1,0 +1,104 @@
+server:
+  port: 9100
+
+spring:
+  application:
+    name: agent-service
+
+  # ═══════════════════════════════════════════
+  # Spring AI — Groq (OpenAI-compatible)
+  # ═══════════════════════════════════════════
+  ai:
+    openai:
+      api-key: ${GROQ_API_KEY:your_groq_api_key_here}
+      base-url: https://api.groq.com/openai
+      chat:
+        options:
+          model: llama-3.3-70b-versatile
+          temperature: 0.3
+
+  # ═══════════════════════════════════════════
+  # Redis — Conversation Memory (30-min TTL)
+  # Reuses existing Redis from the platform
+  # ═══════════════════════════════════════════
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+
+  # ═══════════════════════════════════════════
+  # Kafka — Audit Event Publishing
+  # Reuses existing Kafka from the platform
+  # ═══════════════════════════════════════════
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+
+# ═══════════════════════════════════════════
+# API Gateway — Dynamic base URL (blueprint requirement)
+# For local dev: http://localhost:8090
+# For Docker:    http://api-gateway:8090
+# For K8s:       http://api-gateway.distributed-wallet.svc.cluster.local:8090
+# ═══════════════════════════════════════════
+gateway:
+  base-url: ${GATEWAY_URL:http://localhost:8090}
+
+# ═══════════════════════════════════════════
+# JWT Secret — must match auth-service
+# ═══════════════════════════════════════════
+jwt:
+  secret: ${JWT_SECRET:verysecretkeyverysecretkeyverysecretkeyverysecretkey}
+
+# ═══════════════════════════════════════════
+# Resilience4j — Rate Limiter & Circuit Breaker
+# Protects against agent chat spam and downstream failures
+# ═══════════════════════════════════════════
+resilience4j:
+  ratelimiter:
+    instances:
+      agentChat:
+        limit-for-period: 10           # Max 10 requests per window
+        limit-refresh-period: 60s      # Per 60-second window
+        timeout-duration: 0s           # Fail immediately if rate exceeded (no queuing)
+
+  circuitbreaker:
+    instances:
+      walletService:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+      transactionService:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+
+  timelimiter:
+    instances:
+      walletService:
+        timeout-duration: 5s           # Tool calls time out after 5 seconds
+      transactionService:
+        timeout-duration: 8s           # Transfers given slightly more time
+
+# ═══════════════════════════════════════════
+# Observability
+# ═══════════════════════════════════════════
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, metrics, prometheus, info
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      service: agent-service
