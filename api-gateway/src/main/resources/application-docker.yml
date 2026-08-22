@@ -7,25 +7,6 @@ server:
 spring:
   cloud:
     gateway:
-      globalcors:
-        cors-configurations:
-          '[/**]':
-            allowedOrigins:
-              - "http://localhost"
-              - "http://localhost:80"
-              - "http://consumer-wallet"
-            allowedMethods:
-              - GET
-              - POST
-              - PUT
-              - DELETE
-              - OPTIONS
-            allowedHeaders: "*"
-            allowCredentials: true
-            exposedHeaders:
-              - "X-Correlation-ID"
-      default-filters:
-        - RemoveRequestHeader=Origin
       routes:
         - id: wallet-service
           uri: http://wallet-service:8091
@@ -50,3 +31,11 @@ spring:
           filters:
             - AuthenticationFilter
             - StripPrefix=1
+
+        - id: agent-service
+          uri: http://agent-service:9100
+          predicates:
+            - Path=/api/agent/**
+          filters:
+            - AuthenticationFilter
+
