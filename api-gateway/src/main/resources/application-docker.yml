@@ -17,7 +17,7 @@ spring:
             exposedHeaders: "*"
       routes:
         - id: wallet-service
-          uri: http://wallet-service:8091
+          uri: ${WALLET_SERVICE_URL:http://localhost:8091}
           predicates:
             - Path=/api/wallet/**
           filters:
@@ -25,7 +25,7 @@ spring:
             - StripPrefix=1
 
         - id: transaction-service
-          uri: http://transaction-service:8092
+          uri: ${TRANSACTION_SERVICE_URL:http://localhost:8092}
           predicates:
             - Path=/api/transactions/**, /api/requests/**
           filters:
@@ -33,15 +33,14 @@ spring:
             - StripPrefix=1
 
         - id: auth-service
-          uri: http://auth-service:8093
+          uri: ${AUTH_SERVICE_URL:http://localhost:8093}
           predicates:
             - Path=/api/auth/**
           filters:
-            - AuthenticationFilter
             - StripPrefix=1
 
         - id: agent-service
-          uri: http://agent-service:9100
+          uri: ${AGENT_SERVICE_URL:http://localhost:9100}
           predicates:
             - Path=/api/agent/**
           filters:
