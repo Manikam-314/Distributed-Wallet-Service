@@ -31,7 +31,7 @@ public class AuthenticationFilterGatewayFilterFactory extends AbstractGatewayFil
         return (exchange, chain) -> {
             ServerHttpRequest request = exchange.getRequest();
             
-            if (org.springframework.http.HttpMethod.OPTIONS.equals(request.getMethod())) {
+            if (request.getMethod() != null && "OPTIONS".equalsIgnoreCase(request.getMethod().name())) {
                 return chain.filter(exchange);
             }
 
