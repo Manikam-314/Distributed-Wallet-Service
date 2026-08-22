@@ -33,16 +33,33 @@ export default function App() {
         return;
       }
 
-      try {
-        // Enforce App Load Policy: Fetch wallet state transparently 
-        // to heal any mismatched frontend/backend DB failures silently.
-        const currentWallet = await walletAPI.getWalletByUserId(user.id);
-        setWallet(currentWallet);
-      } catch (err) {
-        console.error("Critical failure resolving wallet identity:", err);
-        // Force re-auth if deeply fractured
+      // Validate the token is still present in localStorage
+      const storedToken = localStorage.getItem("consumer_token");
+      if (!storedToken) {
+        // Token was removed (e.g. by 401 interceptor) — clear auth state
         logout();
         clearWallet();
+        setIsInitializing(false);
+        return;
+      }
+
+      try {
+        // Fetch wallet state to keep frontend in sync with backend
+        const currentWallet = await walletAPI.getWalletByUserId(user.id);
+        setWallet(currentWallet);
+      } catch (err: any) {
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          // Token is truly invalid — force re-auth
+          console.error("Auth expired, forcing re-login");
+          localStorage.removeItem("consumer_token");
+          logout();
+          clearWallet();
+        } else {
+          // Transient error (wallet-service restarting, network blip, etc.)
+          // Keep the user logged in — use cached wallet from zustand persist
+          console.warn("Wallet fetch failed (transient), using cached state:", err?.message);
+        }
       } finally {
         setIsInitializing(false);
       }

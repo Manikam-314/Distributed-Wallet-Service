@@ -28,14 +28,27 @@ function timeAgo(dateStr: string) {
 }
 
 export function Home() {
-  const { user } = useAuthStore();
+  const { user, isBankLinked, linkedBankName, linkedAccountNumber, isUpiPinSet } = useAuthStore();
   const { wallet, setBalance, pendingRequests } = useWalletStore();
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showPendingModal, setShowPendingModal] = useState(false);
+  
+  // Contextual Setup States
+  const [showSetupModal, setShowSetupModal] = useState(false);
+  const [setupModalType, setSetupModalType] = useState<"bank" | "upi">("bank");
+  const [showBalancePrompt, setShowBalancePrompt] = useState(false);
+
   const notifRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 17) return "Good afternoon";
+    return "Good evening";
+  };
 
   useEffect(() => {
     if (wallet?.walletId) {
@@ -58,7 +71,6 @@ export function Home() {
             .then(data => useWalletStore.getState().setPendingRequests(data))
             .catch(console.error);
 
-          // ⭐ FETCH REAL IN-APP NOTIFICATIONS
           notificationAPI.getUserNotifications(user.email, user.mobileNumber)
             .then(data => setNotifications(data))
             .catch(console.error);
@@ -71,7 +83,6 @@ export function Home() {
       return () => clearInterval(interval);
     }
   }, [wallet?.walletId, setBalance, user?.id, user?.email, user?.mobileNumber]);
-
 
   // Click outside to close notifications
   useEffect(() => {
@@ -88,6 +99,45 @@ export function Home() {
     };
   }, [showNotifications]);
 
+  const handleAction = (actionId: string, path: string) => {
+    // Actions requiring Bank and UPI setup
+    const requiresSetup = ["scan", "pay", "to_mobile", "to_bank", "add_money", "check_balance"];
+    
+    if (requiresSetup.includes(actionId)) {
+      if (!isBankLinked) {
+        setSetupModalType("bank");
+        setShowSetupModal(true);
+        return;
+      }
+      if (!isUpiPinSet) {
+        setSetupModalType("upi");
+        setShowSetupModal(true);
+        return;
+      }
+    }
+
+    // If check balance is clicked and verified
+    if (actionId === "check_balance") {
+      setShowBalancePrompt(true);
+      setTimeout(() => setShowBalancePrompt(false), 5000);
+      return;
+    }
+
+    // Default navigation
+    navigate(path);
+  };
+
+  const handleSetupRedirect = () => {
+    setShowSetupModal(false);
+    navigate("/bank-link");
+  };
+
+  const maskValue = (val?: string) => {
+    if (!val) return "XXXX-XXXX";
+    if (val.length <= 4) return val;
+    return `XXXX-XXXX-${val.slice(-4)}`;
+  };
+
   return (
     <PageTransition className="flex flex-col min-h-full w-full max-w-3xl mx-auto bg-background pb-8 md:pt-4">
       {/* Header Profile Section */}
@@ -97,10 +147,15 @@ export function Home() {
             {user?.name?.charAt(0) || "U"}
           </div>
           <div>
-            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest opacity-70">Good Morning,</p>
+            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest opacity-70">
+              {getGreeting()},
+            </p>
             <h1 className="text-xl font-black text-foreground tracking-tight">
               {user ? user.name.split(' ')[0] : "User"}
             </h1>
+            <p className="text-[10px] text-muted-foreground font-semibold mt-0.5 opacity-60">
+              Wallet ID: PVL-{wallet?.walletId || "XXXXXX"}
+            </p>
           </div>
         </div>
 
@@ -204,6 +259,24 @@ export function Home() {
       <div className="px-5">
         <PremiumWalletCard />
 
+        {/* Dynamic Balance Toast notification */}
+        <AnimatePresence>
+          {showBalancePrompt && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mt-3 p-4 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-2xl flex items-center justify-between shadow-md"
+            >
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-semibold text-sm">Available Balance:</span>
+              </div>
+              <span className="font-extrabold text-base">₹{wallet?.balance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Pending Requests Summary/Trigger */}
         {pendingRequests && pendingRequests.length > 0 && (
           <motion.div
@@ -259,12 +332,143 @@ export function Home() {
           )}
         </AnimatePresence>
 
-        <QuickActionGrid />
+        {/* Main Action Grid */}
+        <QuickActionGrid onAction={handleAction} />
+
+        {/* Contextual Setup Modal */}
+        <AnimatePresence>
+          {showSetupModal && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowSetupModal(false)}
+                className="absolute inset-0 bg-background/60 backdrop-blur-md"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 30 }}
+                className="relative w-full max-w-md bg-surface border border-border shadow-2xl rounded-3xl p-6 z-10 text-center"
+              >
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4 text-primary">
+                  <Clock size={32} />
+                </div>
+                <h3 className="text-xl font-bold text-foreground mb-2">Complete UPI Setup to Continue</h3>
+                <p className="text-sm text-muted-foreground mb-6">
+                  {setupModalType === "bank" 
+                    ? "Link your bank account to enable secure transfers, scanning, and payments directly from your bank."
+                    : "Create your secure 6-digit UPI PIN to authorize transactions instantly."}
+                </p>
+                <div className="flex flex-col gap-3">
+                  <Button size="lg" className="w-full" onClick={handleSetupRedirect}>
+                    {setupModalType === "bank" ? "Link Bank Account" : "Set UPI PIN"}
+                  </Button>
+                  <Button variant="ghost" size="lg" className="w-full" onClick={() => setShowSetupModal(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* SECONDARY BLOCKS */}
+        <section className="grid grid-cols-2 gap-4 mt-2 mb-6">
+          {/* Bank Account Status */}
+          <div className="p-4 bg-surface/30 border border-border/60 rounded-2xl flex flex-col justify-between min-h-[110px]">
+            <div>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Bank Account</p>
+              <h4 className="font-bold text-sm text-foreground mt-1.5">
+                {isBankLinked ? linkedBankName : "Not Linked"}
+              </h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {isBankLinked ? maskValue(linkedAccountNumber) : "Add bank account"}
+              </p>
+            </div>
+            {!isBankLinked ? (
+              <button onClick={() => handleAction("to_bank", "/bank-link")} className="text-xs text-primary font-bold text-left mt-2 active:opacity-75">
+                Link Account +
+              </button>
+            ) : (
+              <span className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1">
+                Active ✓
+              </span>
+            )}
+          </div>
+
+          {/* UPI Setup Status */}
+          <div className="p-4 bg-surface/30 border border-border/60 rounded-2xl flex flex-col justify-between min-h-[110px]">
+            <div>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">UPI Security</p>
+              <h4 className="font-bold text-sm text-foreground mt-1.5">
+                {isUpiPinSet ? "UPI PIN Configured" : "UPI PIN Missing"}
+              </h4>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {isUpiPinSet ? "Secured via 6-digit PIN" : "Setup security PIN"}
+              </p>
+            </div>
+            {!isUpiPinSet ? (
+              <button onClick={() => handleAction("set_upi", "/bank-link")} className="text-xs text-primary font-bold text-left mt-2 active:opacity-75">
+                Configure PIN →
+              </button>
+            ) : (
+              <span className="text-[10px] text-emerald-500 font-bold mt-2 flex items-center gap-1">
+                Secured ✓
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* Smart Reminders / Bills */}
+        <section className="mb-6">
+          <h3 className="text-md font-bold mb-3 tracking-tight">Smart Reminders</h3>
+          <div className="space-y-3">
+            <div className="p-4 bg-surface/20 border border-border/40 rounded-2xl flex justify-between items-center">
+              <div>
+                <p className="font-bold text-sm">BESCOM Electricity Bill</p>
+                <p className="text-xs text-muted-foreground">Due in 5 days • Wallet Autopay enabled</p>
+              </div>
+              <div className="text-right">
+                <p className="font-extrabold text-sm">₹1,420.00</p>
+                <button className="text-[10px] text-primary font-black uppercase mt-1">Pay Now</button>
+              </div>
+            </div>
+            <div className="p-4 bg-surface/20 border border-border/40 rounded-2xl flex justify-between items-center">
+              <div>
+                <p className="font-bold text-sm">ACT Fibernet Internet</p>
+                <p className="text-xs text-muted-foreground">Due in 9 days</p>
+              </div>
+              <div className="text-right">
+                <p className="font-extrabold text-sm">₹1,179.00</p>
+                <button className="text-[10px] text-primary font-black uppercase mt-1">Pay Now</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Offers / Rewards */}
+        <section className="mb-6">
+          <h3 className="text-md font-bold mb-3 tracking-tight">Offers & Cashback</h3>
+          <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none">
+            <div className="p-4 bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 rounded-2xl min-w-[220px] max-w-[220px]">
+              <span className="text-[9px] font-black uppercase bg-indigo-500 text-white px-2 py-0.5 rounded-full">New User</span>
+              <p className="font-bold text-sm mt-3">Flat ₹50 Cashback</p>
+              <p className="text-xs text-muted-foreground mt-1">On linking your first bank account today</p>
+            </div>
+            <div className="p-4 bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-2xl min-w-[220px] max-w-[220px]">
+              <span className="text-[9px] font-black uppercase bg-emerald-500 text-white px-2 py-0.5 rounded-full">Cashback</span>
+              <p className="font-bold text-sm mt-3">Up to ₹500 Cashback</p>
+              <p className="text-xs text-muted-foreground mt-1">On sending money via UPI for 3 consecutive days</p>
+            </div>
+          </div>
+        </section>
 
         {/* Recent Transactions */}
         <section className="mt-2">
           <div className="flex justify-between items-end mb-4">
-            <h3 className="text-lg font-bold">Recent Activity</h3>
+            <h3 className="text-md font-bold tracking-tight">Recent Activity</h3>
             <button onClick={() => navigate("/history")} className="text-sm font-medium text-primary active:scale-95 transition-transform">See All</button>
           </div>
 

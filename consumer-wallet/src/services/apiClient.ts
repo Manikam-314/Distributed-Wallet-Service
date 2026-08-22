@@ -32,11 +32,13 @@ apiClient.interceptors.response.use(
     
     if (status === 401 && !isRedirecting && window.location.pathname !== "/auth") {
       isRedirecting = true;
-      // Clear ALL auth state to break any redirect loops
+      // Only remove the JWT token — don't destroy persisted zustand state
+      // (bank link, UPI PIN, etc. should survive across re-logins)
       localStorage.removeItem("consumer_token");
-      localStorage.removeItem("auth-storage");
       // Redirect to auth page
       window.location.href = "/auth";
+      // Reset flag after a short delay so future 401s can also trigger
+      setTimeout(() => { isRedirecting = false; }, 2000);
     }
     
     // Construct a user-friendly error message

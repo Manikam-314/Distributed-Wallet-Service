@@ -15,7 +15,7 @@ export function BankLink() {
   const [pin, setPinState] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const { setPin } = useAuthStore();
+  const { setPin, linkBank } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSearch = () => {
@@ -30,6 +30,7 @@ export function BankLink() {
     setIsVerifying(true);
     setTimeout(() => {
       setIsVerifying(false);
+      linkBank(bank, acc);
       setStep(3);
     }, 2000);
   };

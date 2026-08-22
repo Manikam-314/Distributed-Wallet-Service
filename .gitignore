@@ -56,3 +56,4 @@ tempo-data/
 .venv/
 node_modules/
 dist/
+project.tar.gz

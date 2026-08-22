@@ -151,7 +151,7 @@ export function AuthPage() {
         setWallet(walletData);
       }
 
-      navigate("/kyc");
+      navigate("/");
     } catch (err: any) {
       const data = err.response?.data;
       const errMsg =

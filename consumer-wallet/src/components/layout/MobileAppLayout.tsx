@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { Home, Send, Clock, CreditCard, User } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AIAssistant } from "../wallet/AIAssistant";
 
 const NAV_ITEMS = [
   { id: "home", label: "Home", icon: Home, path: "/" },
@@ -78,6 +79,9 @@ export function MobileAppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+
+      {/* Floating AI Assistant Widget */}
+      <AIAssistant />
     </div>
   );
 }
