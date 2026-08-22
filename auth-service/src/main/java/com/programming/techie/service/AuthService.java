@@ -65,8 +65,8 @@ public class AuthService {
                     .build();
             kafkaTemplate.send("user-registered-topic", savedUser.getId().toString(), userEvent);
             log.info("Emitted UserRegisteredEvent for userId: {}", savedUser.getId());
-        } catch (Exception e) {
-            log.error("Failed to send UserRegisteredEvent to Kafka: {}", e.getMessage());
+        } catch (Throwable t) {
+            log.error("Failed to send UserRegisteredEvent to Kafka: {}", t.getMessage());
         }
 
         // Generate and Send OTP via BOTH channels initially
@@ -80,8 +80,8 @@ public class AuthService {
                     .build();
             kafkaTemplate.send("notificationTopic", event);
             log.info("Emitted NotificationEvent to Kafka for userId: {}", savedUser.getId());
-        } catch (Exception e) {
-            log.error("Failed to send NotificationEvent to Kafka: {}", e.getMessage());
+        } catch (Throwable t) {
+            log.error("Failed to send NotificationEvent to Kafka: {}", t.getMessage());
         }
     }
 
